@@ -347,7 +347,7 @@ void chunking(Options& options, vector<Source>& sources, string targetDir, Stats
 	if (options.noChunking) {
 		return;
 	}
-
+    // if is always executed
 	if (options.chunkMethod == "LASZIP") {
 
 		chunker_countsort_laszip::doChunking(sources, targetDir, stats.min, stats.max, state, outputAttributes, monitor);
@@ -521,6 +521,8 @@ int main(int argc, char** argv) {
 
 	auto options = parseArguments(argc, argv);
 
+
+    //read min-max of x,y and z for all the input LAZ files to determine overall min-max x,y, z
 	auto [name, sources] = curateSources(options.source);
 	if (options.name.size() == 0) {
 		options.name = name;

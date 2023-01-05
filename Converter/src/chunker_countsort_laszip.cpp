@@ -317,17 +317,27 @@ namespace chunker_countsort_laszip {
 				int64_t firstByte = header->offset_to_point_data + numRead * bpp;
 				int64_t numBytes = numToRead * bpp;
 
+                // each thread runs a task for processing point from a single source file.
 				auto task = make_shared<Task>();
+                // the path of the source file from which a thread is assigned points
 				task->path = source.path;
+                // the total point in the file
 				task->totalPoints = numPoints;
+                // the first point in the file to be processed by the thread
 				task->firstPoint = numRead;
+                // the pointer to the first point in the file to be processed by the thread
 				task->firstByte = firstByte;
+
+                // the total bytes in the file to be processed by the thread = num of points to process x bytes required by each point.
 				task->numBytes = numBytes;
+                // num of points in the file to be processed by the thread
 				task->numPoints = numToRead;
 				task->bpp = header->point_data_record_length; 
 				//task->scale = { header->x_scale_factor, header->y_scale_factor, header->z_scale_factor };
 				//task->offset = { header->x_offset, header->y_offset, header->z_offset };
-				task->min = min;
+
+                //min-max are the overall min-max
+                task->min = min;
 				task->max = max;
 
 				pool.addTask(task);
@@ -1207,10 +1217,12 @@ namespace chunker_countsort_laszip {
 
 		auto tStart = now();
 
+        //pointsTotal = sum of all num_points
 		int64_t tmp = state.pointsTotal / 20;
 		maxPointsPerChunk = std::min(tmp, int64_t(10'000'000));
 		// cout << "maxPointsPerChunk: " << maxPointsPerChunk << endl;
 
+        // the actual grid is gridSize x gridSize x gridSize
 		if (state.pointsTotal < 100'000'000) {
 			gridSize = 128;
 		}else if(state.pointsTotal < 500'000'000){
