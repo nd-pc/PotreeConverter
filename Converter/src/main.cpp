@@ -16,6 +16,11 @@
 
 #include "arguments/Arguments.hpp"
 
+#include "record_timings.hpp"
+
+
+RECORD_TIMINGS_INIT();
+
 using namespace std;
 
 Options parseArguments(int argc, char** argv) {
@@ -508,7 +513,7 @@ int main(int argc, char** argv) {
 	// 	return 0;
 	// }
 
-
+    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "The total_ execution time");
 
 	double tStart = now(); 
 
@@ -565,6 +570,8 @@ int main(int argc, char** argv) {
 	monitor->stop();
 
 	createReport(options, sources, targetDir, stats, state, tStart);
+
+    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "The total_ execution time");
 
 
 	return 0;

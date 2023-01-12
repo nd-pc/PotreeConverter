@@ -26,7 +26,7 @@ set(HEADER_FILES
 	./Converter/include/logger.h
 	./Converter/modules/LasLoader/LasLoader.h
 	./Converter/modules/unsuck/unsuck.hpp
-)
+		./Converter/include/record_timings.hpp)
 
 add_executable(PotreeConverter 
 	./Converter/src/chunker_countsort_laszip.cpp
