@@ -11,6 +11,7 @@
 #include "DbgWriter.h"
 #include "brotli/encode.h"
 #include "HierarchyBuilder.h"
+#include "record_timings.hpp"
 
 using std::unique_lock;
 
@@ -1637,7 +1638,8 @@ void doIndexing(string targetDir, State& state, Options& options, Sampler& sampl
 	vector<shared_ptr<Node>> nodes;
 	int numThreads = numSampleThreads() + 4;
 	TaskPool<Task> pool(numThreads, [&onNodeCompleted, &onNodeDiscarded, &writeAndUnload, &state, &options, &activeThreads, tStart, &lastReport, &totalPoints, totalBytes, &pointsProcessed, chunks, &indexer, &nodes, &mtx_nodes, &sampler](auto task) {
-		
+
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "indexing time");
 		auto chunk = task->chunk;
 		auto chunkRoot = make_shared<Node>(chunk->id, chunk->min, chunk->max);
 		auto attributes = chunks->attributes;
@@ -1668,7 +1670,11 @@ void doIndexing(string targetDir, State& state, Options& options, Sampler& sampl
 
 		buildHierarchy(&indexer, chunkRoot.get(), pointBuffer, numPoints);
 
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "sampling in indexing time");
+
 		sampler.sample(chunkRoot.get(), attributes, indexer.spacing, onNodeCompleted, onNodeDiscarded);
+
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "sampling in indexing time");
 
 		// detach anything below the chunk root. Will be reloaded from
 		// temporarily flushed hierarchy during creation of the hierarchy file
@@ -1699,6 +1705,7 @@ void doIndexing(string targetDir, State& state, Options& options, Sampler& sampl
 		logger::INFO("finished indexing chunk " + chunk->id);
 
 		activeThreads--;
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "indexing time");
 	});
 
 	for (auto chunk : chunks->list) {
@@ -1712,6 +1719,8 @@ void doIndexing(string targetDir, State& state, Options& options, Sampler& sampl
 	indexer.fChunkRoots.close();
 
 	{ // process chunk roots in batches
+
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "final merge time");
 		
 		string tmpChunkRootsPath = targetDir + "/tmpChunkRoots.bin";
 		auto tasks = indexer.processChunkRoots();
@@ -1729,6 +1738,8 @@ void doIndexing(string targetDir, State& state, Options& options, Sampler& sampl
 
 			task.node->children.clear();
 		}
+
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "final merge time");
 	}
 
 

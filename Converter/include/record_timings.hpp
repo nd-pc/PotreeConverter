@@ -49,14 +49,7 @@ using namespace std;
         int level;
     } time_record_to_save;
 
-    pid_t get_thread_id() {
 
-#ifdef SYS_gettid
-        return syscall(SYS_gettid);
-#else
-#error "SYS_gettid unavailable on this system"
-#endif
-    }
 
     class Record_timings {
     public:
@@ -94,6 +87,8 @@ using namespace std;
             }
 #endif
             rec.recordToSave.level = starts.size();
+
+
             starts.push(rec);
 
         }
@@ -231,115 +226,70 @@ using namespace std;
         };
         map<string, time_record_to_save> timeStamps;
         stack<time_record_all> starts;
-        bool is_main;
 
     };
 
-    /*typedef struct {
-        pid_t tid;
-        Record_timings a;
-    } thread_time_record;*/
-
-
     extern map<pid_t, Record_timings> thread_time_record_map;
 
-    map<pid_t, Record_timings> thread_time_record_map;
 
     extern map<string, vector<pid_t>> desc_thread_map;
 
-    static pthread_mutex_t record_timings_lock = PTHREAD_MUTEX_INITIALIZER;
+    extern pthread_mutex_t thread_time_record_map_lock;
 
-    static pid_t main_pid;
+    extern pthread_mutex_t desc_thread_map_lock;
 
-    extern bool init_call = false;
 
-    /*static void inline init_record_timings() {
+    static inline pid_t get_thread_id() {
 
-        thread_time_record_map; //= new map<pid_t, Record_timings>;
-        desc_thread_map = new  map<string, vector<pid_t>>;
-        main_pid = get_thread_id();
-        thread_time_record_map.emplace(main_pid, Record_timings());
-        init_call = true;
-
-    }8/
-
-    static void destroy_record_timings() {
-        //delete thread_time_record_map;
+#ifdef SYS_gettid
+        return syscall(SYS_gettid);
+#else
+#error "SYS_gettid unavailable on this system"
+#endif
     }
 
 
-    /*struct find_thread_timing_record : unary_function<thread_time_record, bool> {
-        thread_time_record record;
 
-        find_thread_timing_record(thread_time_record id) : record(id) {}
 
-        bool operator()(thread_time_record const &m) const {
-            return (m.tid == record.tid);
-        }
-    };*/
+    static inline void thread_start_timing(Machine t, const string &desc, const int line_start, const string &file_name) {
 
-    static void
-    thread_start_timing(Machine t, const string &desc, const int line_start, const string &file_name) {
+
 
         pid_t thread_id = get_thread_id();
 
+        if (desc_thread_map.contains(desc)){
+            if (find(desc_thread_map.at(desc).cbegin(), desc_thread_map.at(desc).cend(), thread_id) == desc_thread_map.at(desc).cend()) {
+                pthread_mutex_lock(&desc_thread_map_lock);
+                desc_thread_map.at(desc).push_back(thread_id);
+                pthread_mutex_unlock(&desc_thread_map_lock);
+            }
 
+        } else{
+            pthread_mutex_lock(&desc_thread_map_lock);
+            //cout << "1Descriptor, Thread ID" << desc << "," << thread_id << "\n";
+            vector<pid_t> tmp;
+            tmp.push_back(thread_id);
+            desc_thread_map.emplace(desc, tmp);
+            pthread_mutex_unlock(&desc_thread_map_lock);
+        }
 
         if(thread_time_record_map.contains(thread_id)){
             thread_time_record_map.at(thread_id).start_timing(t, desc, line_start, file_name);
         }
         else{
-            pthread_mutex_lock(&record_timings_lock);
+            pthread_mutex_lock(&thread_time_record_map_lock);
             thread_time_record_map.emplace(thread_id, Record_timings());
-            pthread_mutex_unlock(&record_timings_lock);
+            pthread_mutex_unlock(&thread_time_record_map_lock);
             thread_time_record_map.at(thread_id).start_timing(t, desc, line_start, file_name);
         }
-        if (desc_thread_map.contains(desc)){
-            desc_thread_map.at(desc).push_back(thread_id);
-        } else{
-            desc_thread_map.emplace(desc, thread_id);
-        }
 
 
-        /*thread_time_record record_to_find;
-        record_to_find.tid = tid;
 
-        auto it = find_if(thread_time_record_vec->begin(), thread_time_record_vec->end(),
-                               find_thread_timing_record(record_to_find));
-
-
-        if (it != thread_time_record_vec->end()) {
-            (it->a).start_timing(t, desc, line_start, file_name);
-
-        } else {
-            thread_time_record rec;
-            rec.tid = tid;
-            rec.a.start_timing(t, desc, line_start, file_name);
-            if (!pthread_mutex_lock(&record_timings_lock)) {
-                thread_time_record_vec->push_back(rec);
-            } else {
-                cerr << "Unable to able to add thread " << tid << " in record timings" << endl;
-                exit(EXIT_FAILURE);
-            }
-            if (pthread_mutex_unlock(&record_timings_lock)) {
-                cerr << "Unable to able to add thread " << tid << " in record timings" << endl;
-                exit(EXIT_FAILURE);
-            }
-
-        }*/
     }
 
 
-    static void
-    thread_stop_timing(Machine t, const string &desc, const int line_stop, const string &file_name,
+    static inline void thread_stop_timing(Machine t, const string &desc, const int line_stop, const string &file_name,
                        uint64_t flops = 0) {
-
-        /*thread_time_record record_to_find;
-        record_to_find.tid = tid;
-
-
-        auto it = find_if(thread_time_record_vec->begin(), thread_time_record_vec->end(),
-                               find_thread_timing_record(record_to_find));*/
 
         pid_t thread_id = get_thread_id();
 
@@ -352,7 +302,7 @@ using namespace std;
         }
     }
 
-    void
+    /*void
     find_parent(const int i, const string &parent_desc, vector<tuple<string, float>> &parent_times,
                 vector<time_record_to_save> &timeStamps) {
         if (i >= timeStamps.size()) return;
@@ -401,21 +351,10 @@ using namespace std;
         stream << "================================================================================" << endl;
 
 
-    }
+    }*/
 
 
-    struct find_timeStamps : unary_function<time_record_to_save, bool> {
-        time_record_to_save record;
-
-        find_timeStamps(time_record_to_save id) : record(id) {}
-
-        bool operator()(time_record_to_save const &m) const {
-            return (m.desc == record.desc && m.parent_desc == record.parent_desc && m.level == record.level &&
-                    m.t == record.t);
-        }
-    };
-
-    static float get_process_time(){
+    static inline float get_process_time(){
 
             int fd;
             char buff[128];
@@ -435,8 +374,16 @@ using namespace std;
                     //boottime = tv.tv_sec - uptime;
 
                 }
+                else {
+                    cerr << "Unable to read /proc/uptime\n";
+                    exit(EXIT_FAILURE);
+                }
                 close(fd);
+            } else {
+                cerr << "Unable to open /proc/uptime\n";
+                exit(EXIT_FAILURE);
             }
+
 
 
             ifstream procFile;
@@ -465,12 +412,16 @@ using namespace std;
 
     }
 
-    static void thread_print_timing(ostream &stream) {
+    static inline void thread_print_timing(ostream &stream) {
 
 
         float total_time = get_process_time();
 
-        stream << "Total runtime: " << total_time << "\n";
+        stream << "\n=========================Record_timings results=================================" << endl;
+
+        stream << "Total runtime=" << total_time << " seconds\n";
+
+
 
 
         for(auto& it_desc_map: desc_thread_map){
@@ -481,69 +432,50 @@ using namespace std;
                 avg_time += a.timeStamps_map().at(it_desc_map.first).time_diff/it_desc_map.second.size();
                 m =  a.timeStamps_map().at(it_desc_map.first).t;
             }
-            stream << "Average Time spent in \"" << it_desc_map.first << "\" by " << it_desc_map.second.size()   << " threads on "  << (m == Machine::cpu ? "CPU" : "GPU") << ": "
-                   << avg_time << "ms" << " which is" <<  (avg_time/total_time)*100 << "% of the total run time\n";
+            stream << "\tAverage Time spent in \"" << it_desc_map.first << "\" by " << it_desc_map.second.size()   << " threads on "  << (m == Machine::cpu ? "CPU" : "GPU") << "="
+                   << avg_time << " ms" << ", which is " <<  (avg_time/(total_time * 1e3))*100 << "% of the total runtime\n";
         }
-
-
-
-        /*auto longest_record_timings_thread = thread_time_record_vec->begin();
-        for (auto itr = thread_time_record_vec->begin(); itr != thread_time_record_vec->end(); itr++) {
-            if (itr->a.size() > longest_record_timings_thread->a.size()) {
-                longest_record_timings_thread = itr;
-            }
-        }
-
-        vector<time_record_to_save> avg_timeStamps;
-        for (auto longest_itr = longest_record_timings_thread->a.timeStamps_vec().begin();
-             longest_itr != longest_record_timings_thread->a.timeStamps_vec().end(); longest_itr++) {
-            time_record_to_save longest_itr_record = *longest_itr;
-            time_record_to_save avg_timeStamps_rec = longest_itr_record;
-            //avg_timeStamps_rec.desc=longest_itr_record.desc;
-            //avg_timeStamps_rec.time_diff = longest_itr_record.time_diff;
-            //avg_timeStamps_rec.flops = longest_itr_record.flops;
-            //avg_timeStamps_rec.t = longest_itr_record.t;
-            //avg_timeStamps_rec.parent_desc = longest_itr_record.parent_desc;
-            //avg_timeStamps_rec.level = longest_itr_record.level;
-
-
-            int n_threads = 1;
-            for (auto other_threads = thread_time_record_vec->begin();
-                 other_threads != thread_time_record_vec->end(); other_threads++) {
-                if (other_threads == longest_record_timings_thread) continue;
-                auto itr = find_if(other_threads->a.timeStamps_vec().begin(),
-                                        other_threads->a.timeStamps_vec().end(), find_timeStamps(longest_itr_record));
-                if (itr != other_threads->a.timeStamps_vec().end()) {
-                    avg_timeStamps_rec.time_diff += itr->time_diff;
-                    avg_timeStamps_rec.flops += itr->flops;
-                    n_threads++;
-                }
-            }
-            avg_timeStamps_rec.time_diff /= (float) n_threads;
-            avg_timeStamps_rec.flops /= (float) n_threads;
-
-            avg_timeStamps.push_back(avg_timeStamps_rec);
-        }
-
-        print_timings(stream, avg_timeStamps);*/
+        stream << "================================================================================" << endl;
 
 
     }
 
-#define RECORD_TIMINGS_INIT() \
-    map<pid_t, recordTimings::Record_timings> thread_time_record_map; \
-    map<string, vector<pid_t>> desc_thread_map;\
-
-
-//#define RECORD_TIMINGS_DESTROY() {destroy_record_timings();}
-
-#define RECORD_TIMINGS_START(machine, desc_str) {thread_start_timing((machine), (desc_str),  __LINE__, __FILE__);}
-
-#define RECORD_TIMINGS_STOP(machine, desc_str) {thread_stop_timing((machine), (desc_str),  __LINE__, __FILE__);}
-
-#define RECORD_TIMINGS_STOP_WITH_FLOPS(machine, desc_str, flops) {thread_stop_timing((machine), (desc_str), __LINE__, __FILE__, flops);}
-
-#define RECORD_TIMINGS_PRINT(stream) {thread_print_timing(stream);}
-
+    extern bool disable;
 
 }
+
+
+
+#define RECORD_TIMINGS_DISABLE() {recordTimings:disable = true;}
+
+#define RECORD_TIMINGS_INIT()\
+    map<pid_t, recordTimings::Record_timings> recordTimings::thread_time_record_map;\
+    map<string, vector<pid_t>> recordTimings::desc_thread_map;\
+    pthread_mutex_t recordTimings::thread_time_record_map_lock = PTHREAD_MUTEX_INITIALIZER;\
+    pthread_mutex_t recordTimings::desc_thread_map_lock = PTHREAD_MUTEX_INITIALIZER;\
+    bool recordTimings::disable = false;
+
+
+#define RECORD_TIMINGS_START(machine, desc_str) \
+    if (!recordTimings::disable)                 \
+    {                                           \
+        recordTimings::thread_start_timing((machine), (desc_str),  __LINE__, __FILE__); \
+    }
+
+#define RECORD_TIMINGS_STOP(machine, desc_str) \
+    if (!recordTimings::disable)               \
+    {                                          \
+        recordTimings::thread_stop_timing((machine), (desc_str),  __LINE__, __FILE__); \
+    }
+
+#define RECORD_TIMINGS_STOP_WITH_FLOPS(machine, desc_str, flops)  \
+    if (!recordTimings::disable)                                   \
+    {                                                              \
+        recordTimings::thread_stop_timing((machine), (desc_str), __LINE__, __FILE__, flops); \
+    }
+
+#define RECORD_TIMINGS_PRINT(stream) \
+    if (!recordTimings::disable)     \
+    {                                \
+        recordTimings::thread_print_timing(stream); \
+    }

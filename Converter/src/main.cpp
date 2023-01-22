@@ -19,7 +19,7 @@
 #include "record_timings.hpp"
 
 
-RECORD_TIMINGS_INIT();
+
 
 using namespace std;
 
@@ -499,6 +499,12 @@ void generatePage(string exePath, string pagedir, string pagename) {
 
 #include "HierarchyBuilder.h"
 
+RECORD_TIMINGS_INIT();
+
+//map<pid_t, recordTimings::Record_timings> thread_time_record_map;\
+//map<string, vector<pid_t>> desc_thread_map;
+
+
 int main(int argc, char** argv) {
 
 	
@@ -561,6 +567,9 @@ int main(int argc, char** argv) {
 
 	{ // this is the real important stuff
 
+        //output attributes are point attributes in LAZ including scale and offset
+        //monitor for printing output messages about CPU, RAM usage and throughput
+        //sate for keeping track of points processed
 		chunking(options, sources, targetDir, stats, state, outputAttributes, monitor.get());
 
 		indexing(options, targetDir, state);
@@ -573,6 +582,8 @@ int main(int argc, char** argv) {
 
     RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "The total_ execution time");
 
+
+    RECORD_TIMINGS_PRINT(cout);
 
 	return 0;
 }

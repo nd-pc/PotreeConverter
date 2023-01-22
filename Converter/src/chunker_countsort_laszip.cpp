@@ -21,6 +21,7 @@
 #include "LasLoader/LasLoader.h"
 #include "PotreeConverter.h"
 #include "logger.h"
+#include "record_timings.hpp"
 
 using json = nlohmann::json;
 
@@ -156,10 +157,14 @@ namespace chunker_countsort_laszip {
 		};
 
 		auto processor = [gridSize, &grid, tStart, &state, &outputAttributes, monitor](shared_ptr<Task> task){
+
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "counting time");
 			string path = task->path;
+            //the firstbyte to process
 			int64_t start = task->firstByte;
 			int64_t numBytes = task->numBytes;
 			int64_t numToRead = task->numPoints;
+            //point data record length
 			int64_t bpp = task->bpp;
 			//Vector3 scale = task->scale;
 			//Vector3 offset = task->offset;
@@ -176,7 +181,7 @@ namespace chunker_countsort_laszip {
 			logger::INFO(ss.str());
 			
 			
-
+            // never uses it here
 			thread_local unique_ptr<void, void(*)(void*)> buffer(nullptr, free);
 			thread_local int64_t bufferSize = -1;
 
@@ -191,6 +196,7 @@ namespace chunker_countsort_laszip {
 				bufferSize = numBytes;
 			}
 
+            //
 			laszip_POINTER laszip_reader;
 			{
 				laszip_BOOL is_compressed = iEndsWith(path, ".laz") ? 1 : 0;
@@ -213,6 +219,7 @@ namespace chunker_countsort_laszip {
 			auto posScale = outputAttributes.posScale;
 			auto posOffset = outputAttributes.posOffset;
 
+            // for ecah point determine the cell of the grid it belongs and increment it
 			for (int i = 0; i < numToRead; i++) {
 				int64_t pointOffset = i * bpp;
 
@@ -271,6 +278,8 @@ namespace chunker_countsort_laszip {
 			state.pointsProcessed = pointsProcessed;
 			state.duration = now() - tStart;
 
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "counting time");
+
 			//cout << ("end: " + formatNumber(dbgCurr)) << endl;
 		};
 
@@ -323,12 +332,12 @@ namespace chunker_countsort_laszip {
 				task->path = source.path;
                 // the total point in the file
 				task->totalPoints = numPoints;
-                // the first point in the file to be processed by the thread
+                // the first point  to be processed by the thread
 				task->firstPoint = numRead;
-                // the pointer to the first point in the file to be processed by the thread
+                // the pointer to the first point  to be processed by the thread
 				task->firstByte = firstByte;
 
-                // the total bytes in the file to be processed by the thread = num of points to process x bytes required by each point.
+                // the total bytes  to be processed by the thread = num of points to process x bytes required by each point.
 				task->numBytes = numBytes;
                 // num of points in the file to be processed by the thread
 				task->numPoints = numToRead;
@@ -340,6 +349,7 @@ namespace chunker_countsort_laszip {
                 task->min = min;
 				task->max = max;
 
+                // there are numProcessors in the pool
 				pool.addTask(task);
 
 				numRead += batchSize;
@@ -705,6 +715,7 @@ namespace chunker_countsort_laszip {
 
 		auto processor = [&mtx_push_point, &counters, targetDir, &state, tStart, &outputAttributes](shared_ptr<Task> task) {
 
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "distribute time");
 			auto path = task->path;
 			auto batchSize = task->batchSize;
 			auto* lut = task->lut;
@@ -941,7 +952,7 @@ namespace chunker_countsort_laszip {
 				}
 			}
 
-
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "distribute time");
 		};
 
 		TaskPool<Task> pool(numChunkerThreads, processor);
@@ -1080,18 +1091,23 @@ namespace chunker_countsort_laszip {
 	// 
 	// XXX_high: variables of the higher/more detailed level of the pyramid that we're evaluating right now
 	// XXX_low: one level lower than _high; the target of the "downsampling" operation
-	// 
+	// This function first merges sparse cells of the grid created in counting step (countPointsInCells function).
+    // The effect is that some chunks are merged with some others and move to low level(less detail) in the hierarchy.
+    // Then create LUT. See "Merging Sparse Cells" and "Create Chunk Lookup Table" on page 28 of Markus PhD theis
+    //This is a single threaded function
 	NodeLUT createLUT(vector<atomic_int32_t>& grid, int64_t gridSize) {
+
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "merge time");
 		auto tStart = now();
 
 		auto for_xyz = [](int64_t gridSize, function< void(int64_t, int64_t, int64_t)> callback) {
 
 			for (int x = 0; x < gridSize; x++) {
-			for (int y = 0; y < gridSize; y++) {
-			for (int z = 0; z < gridSize; z++) {
-				callback(x, y, z);
-			}
-			}
+			    for (int y = 0; y < gridSize; y++) {
+			        for (int z = 0; z < gridSize; z++) {
+				        callback(x, y, z);
+			        }
+			    }
 			}
 
 		};
@@ -1192,8 +1208,11 @@ namespace chunker_countsort_laszip {
 			grid_high = grid_low;
 		}
 
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "merge time");
+
 		// - create lookup table
 		// - loop through nodes, add pointers to node/chunk for all enclosed cells in LUT.
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "create LUT time");
 		vector<int32_t> lut(gridSize* gridSize* gridSize, -1);
 		for (int i = 0; i < nodes.size(); i++) {
 			auto node = nodes[i];
@@ -1207,6 +1226,8 @@ namespace chunker_countsort_laszip {
 				lut[index] = i;
 			});
 		}
+
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "create LUT time");
 
 		printElapsedTime("createLUT", tStart);
 
@@ -1242,13 +1263,20 @@ namespace chunker_countsort_laszip {
 			}
 		}
 
-		// COUNT
+
+		// COUNT: this function determines the cell to which a point belongs in a grid of gridSize x gridSize x gridSize and increments it.
+        // For large data s AHN3 the grid is 512 x 512 x 512
 		auto grid = countPointsInCells(sources, min, max, gridSize, state, outputAttributes, monitor);
+
 
 		{ // DISTIRBUTE
 			auto tStartDistribute = now();
 
+
+
 			auto lut = createLUT(grid, gridSize);
+
+
 
 			state.currentPass = 2;
 			distributePoints(sources, min, max, targetDir, lut, state, outputAttributes, monitor);
