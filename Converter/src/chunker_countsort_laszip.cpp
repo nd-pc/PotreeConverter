@@ -359,12 +359,12 @@ namespace chunker_countsort_laszip {
 			laszip_destroy(laszip_reader);
 		}
 
-		printElapsedTime("tStartTaskAssembly", tStartTaskAssembly);
+		//printElapsedTime("tStartTaskAssembly", tStartTaskAssembly);
 
 		pool.waitTillEmpty();
 		pool.close();
 
-		printElapsedTime("countPointsInCells", tStart);
+		//printElapsedTime("countPointsInCells", tStart);
 
 		double duration = now() - tStart;
 
@@ -692,7 +692,7 @@ namespace chunker_countsort_laszip {
 
 		writer = new ConcurrentWriter(numFlushThreads, state);
 
-		printElapsedTime("distributePoints0", tStart);
+		//printElapsedTime("distributePoints0", tStart);
 
 		vector<std::atomic_int32_t> counters(nodes.size());
 
@@ -711,7 +711,7 @@ namespace chunker_countsort_laszip {
 
 		mutex mtx_push_point;
 
-		printElapsedTime("distributePoints1", tStart);
+		//printElapsedTime("distributePoints1", tStart);
 
 		auto processor = [&mtx_push_point, &counters, targetDir, &state, tStart, &outputAttributes](shared_ptr<Task> task) {
 
@@ -1229,7 +1229,7 @@ namespace chunker_countsort_laszip {
 
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "create LUT time");
 
-		printElapsedTime("createLUT", tStart);
+		//printElapsedTime("createLUT", tStart);
 
 		return {gridSize, lut};
 	}
@@ -1256,7 +1256,7 @@ namespace chunker_countsort_laszip {
 
 		{ // prepare/clean target directories
 			string dir = targetDir + "/chunks";
-			fs::create_directories(dir);
+			//fs::create_directories(dir);
 
 			for (const auto& entry : std::filesystem::directory_iterator(dir)) {
 				std::filesystem::remove(entry);
@@ -1266,21 +1266,25 @@ namespace chunker_countsort_laszip {
 
 		// COUNT: this function determines the cell to which a point belongs in a grid of gridSize x gridSize x gridSize and increments it.
         // For large data s AHN3 the grid is 512 x 512 x 512
-		auto grid = countPointsInCells(sources, min, max, gridSize, state, outputAttributes, monitor);
 
+        auto tStartCount = now();
+		auto grid = countPointsInCells(sources, min, max, gridSize, state, outputAttributes, monitor);
+        printElapsedTime("countPointsInCells", tStartCount);
 
 		{ // DISTIRBUTE
 			auto tStartDistribute = now();
 
 
-
+            // MERGE: this function merges cells in a grid of gridSize x gridSize x gridSize
+            auto tStartMerge = now();
 			auto lut = createLUT(grid, gridSize);
-
+            printElapsedTime("createLUT", tStartMerge);
 
 
 			state.currentPass = 2;
+            auto tStartDistributePoints = now();
 			distributePoints(sources, min, max, targetDir, lut, state, outputAttributes, monitor);
-
+            printElapsedTime("distributePoints", tStartDistributePoints);
 			{
 				double duration = now() - tStartDistribute;
 				state.values["duration(chunking-distribute)"] = formatNumber(duration, 3);

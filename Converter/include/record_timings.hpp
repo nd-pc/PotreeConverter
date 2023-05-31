@@ -445,8 +445,7 @@ using namespace std;
 }
 
 
-
-#define RECORD_TIMINGS_DISABLE() {recordTimings:disable = true;}
+#define RECORD_TIMINGS_DISABLE() {recordTimings::disable = true;}
 
 #define RECORD_TIMINGS_INIT()\
     map<pid_t, recordTimings::Record_timings> recordTimings::thread_time_record_map;\

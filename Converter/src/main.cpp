@@ -2,7 +2,7 @@
 
 #include <iostream>
 #include <execution>
-
+#include "MPIcommon.h"
 #include "unsuck/unsuck.hpp"
 #include "chunker_countsort_laszip.h"
 #include "indexer.h"
@@ -17,6 +17,8 @@
 #include "arguments/Arguments.hpp"
 
 #include "record_timings.hpp"
+
+
 
 
 
@@ -373,12 +375,34 @@ void chunking(Options& options, vector<Source>& sources, string targetDir, Stats
 	}
 }
 
+/*void MPIchunkDistributor(string targetDir){
+
+    thread t([targetDir]() {
+
+        vector<string> allChunkFiles;
+        for (const auto& entry : fs::directory_iterator(targetDir)) {
+            string filename = entry.path().filename().string();
+            allChunkFiles.push_back(filename);
+        }
+        int done = 0;
+        while (done < allChunkFiles.size()){
+        }
+
+    });
+    t.detach();
+}*/
+
 void indexing(Options& options, string targetDir, State& state) {
 
 	if (options.noIndexing) {
 		return;
 	}
 
+    /*if(task_num == MASTER) {
+
+    }
+    string wait = "waiting";
+    MPI_Send(wait.c_str(), wait.length(),MPI_CHAR, MASTER, 0, MPI_COMM_WORLD);*/
 	if (options.method == "random") {
 
 		SamplerRandom sampler;
@@ -504,10 +528,20 @@ RECORD_TIMINGS_INIT();
 //map<pid_t, recordTimings::Record_timings> thread_time_record_map;\
 //map<string, vector<pid_t>> desc_thread_map;
 
-
+int n_tasks, task_id;
 int main(int argc, char** argv) {
 
-	
+    RECORD_TIMINGS_DISABLE();
+    int provided;
+    MPI_Init_thread(&argc,&argv,MPI_THREAD_SERIALIZED,&provided);
+    if(provided != MPI_THREAD_SERIALIZED){
+        cout << "MPI does not support MPI_THREAD_SERIALIZED" << endl;
+        exit(1);
+    }
+
+
+    MPI_Comm_size(MPI_COMM_WORLD, &n_tasks);
+    MPI_Comm_rank(MPI_COMM_WORLD,&task_id);
 	// { // DEBUG STUFF
 
 	// 	string hierarchyDir = "D:/dev/pointclouds/Riegl/retz_converted/.hierarchyChunks";
@@ -545,7 +579,7 @@ int main(int argc, char** argv) {
 	auto stats = computeStats(sources);
 	
 	string targetDir = options.outdir;
-	if (options.generatePage) {
+	if (options.generatePage && task_id == MASTER) {
 
 		string pagedir = targetDir;
 		generatePage(exePath, pagedir, options.pageName);
@@ -553,16 +587,23 @@ int main(int argc, char** argv) {
 		targetDir = targetDir + "/pointclouds/" + options.pageName;
 	}
 	cout << "target directory: '" << targetDir << "'" << endl;
-	fs::create_directories(targetDir);
-	logger::addOutputFile(targetDir + "/log.txt");
 
+    string logFile = targetDir + "/log.txt";
+    if(task_id == MASTER) {
+        fs::remove_all(targetDir);
+        fs::create_directories(targetDir);
+        fs::create_directories(targetDir + "/chunks");
+        fs::create_directories(targetDir + "/.hierarchyChunks");
+        logger::addOutputFile(logFile);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
 	State state;
 	state.pointsTotal = stats.totalPoints;
 	state.bytesProcessed = stats.totalBytes;
 
 	// auto monitor = startMonitoring(state);
 	auto monitor = make_shared<Monitor>(&state);
-	monitor->start();
+	//monitor->start();
 
 
 	{ // this is the real important stuff
@@ -570,20 +611,28 @@ int main(int argc, char** argv) {
         //output attributes are point attributes in LAZ including scale and offset
         //monitor for printing output messages about CPU, RAM usage and throughput
         //sate for keeping track of points processed
-		chunking(options, sources, targetDir, stats, state, outputAttributes, monitor.get());
+        if (task_id == MASTER) {
+            chunking(options, sources, targetDir, stats, state, outputAttributes, monitor.get());
+        }
 
+        MPI_Barrier(MPI_COMM_WORLD);
 		indexing(options, targetDir, state);
 
 	}
 
-	monitor->stop();
+	//monitor->stop();
 
-	createReport(options, sources, targetDir, stats, state, tStart);
+    if(task_id == MASTER) {
+        createReport(options, sources, targetDir, stats, state, tStart);
+    }
+
 
     RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "The total_ execution time");
 
 
     RECORD_TIMINGS_PRINT(cout);
+
+    MPI_Finalize();
 
 	return 0;
 }

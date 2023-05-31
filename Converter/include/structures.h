@@ -17,11 +17,12 @@ using std::shared_ptr;
 using std::function;
 using std::mutex;
 
+
 struct CumulativeColor {
-	int64_t r = 0;
-	int64_t g = 0;
-	int64_t b = 0;
-	int64_t w = 0;
+	int16_t r = 0;
+	int16_t g = 0;
+	int16_t b = 0;
+	int16_t w = 0;
 };
 
 struct Node {
