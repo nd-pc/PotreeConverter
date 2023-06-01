@@ -15,7 +15,7 @@
 #/home/anauman/escience/projects/nD-PC/PotreeConverter/build/PotreeConverter --encoding BROTLI -i /scratch/anauman/escience/projects/nD-PC/ahn3/C_69AN1.LAZ /scratch/anauman/escience/projects/nD-PC/ahn3/C_69AN2.LAZ /scratch/anauman/escience/projects/nD-PC/ahn3/C_69AZ1.LAZ /scratch/anauman/escience/projects/nD-PC/ahn3/C_69AZ2.LAZ  -o /scratch/anauman/escience/projects/nD-PC/PotreeConverter_output 
 
 
-mpiexec /home/anauman/escience/projects/nD-PC/PotreeConverter/build/PotreeConverterMPI --encoding BROTLI -i echo $(echo $(ls /scratch/anauman/escience/projects/nD-PC/ahn3/C_69AN1.LAZ))  -o /scratch/anauman/escience/projects/nD-PC/PotreeConverter_output
+mpiexec /home/anauman/escience/projects/nD-PC/PotreeConverter/build/PotreeConverterMPI --encoding BROTLI -i echo $(echo $(ls /scratch/anauman/escience/projects/nD-PC/ahn3_C69/C_69AN1.LAZ))  -o /scratch/anauman/escience/projects/nD-PC/PotreeConverter_output
 #timepid=$!
 #potreepid=$(pgrep -P $timepid)
 
@@ -30,7 +30,7 @@ mpiexec /home/anauman/escience/projects/nD-PC/PotreeConverter/build/PotreeConver
 
 
 
-#--encoding BROTLI -i /scratch/anauman/escience/projects/nD-PC/ahn3/C_69AN1.LAZ  -o /scratch/anauman/escience/projects/nD-PC/PotreeConverter_output
+#--encoding BROTLI -i /scratch/anauman/escience/projects/nD-PC/ahn3_C69/C_69AN1.LAZ  -o /scratch/anauman/escience/projects/nD-PC/PotreeConverter_output
 
 
 

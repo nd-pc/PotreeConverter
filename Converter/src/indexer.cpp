@@ -1834,7 +1834,7 @@ void Writer::writeAndUnload(Node* node) {
 		activeBuffer->pos += byteSize;
 
         indexer->octreeFileOffset += byteSize;
-	}	
+	}
 
 	memcpy(buffer->data_char + targetOffset, sourceBuffer->data, byteSize);
 
@@ -2084,29 +2084,36 @@ void doIndexing(string targetDir, State& state, Options& options, Sampler& sampl
     cout << "Process " << task_id << " taskpool finished." << endl;
     cout.flush();
 
-    for (int i = task_id + 1; i < n_tasks; i++){
+    for (int i = task_id - 1; i >= 0; i--){
         MPI_Request sendOffsetRequest = MPI_REQUEST_NULL;
         MPI_Isend(&indexer.octreeFileOffset, 1, MPI_INT64_T, i, 20, MPI_COMM_WORLD, &sendOffsetRequest);
     }
 
-    int64_t offset[task_id];
-    MPI_Request recvOffsetRequest[task_id];
-    for(int i = task_id - 1; i >= 0; i--){
-        MPI_Irecv(&offset, 1, MPI_INT64_T, i, 20, MPI_COMM_WORLD, &recvOffsetRequest[i]);
+    int64_t offset[n_tasks- task_id - 1];
+    MPI_Request recvOffsetRequest[n_tasks - task_id - 1];
+    for(int i = task_id + 1; i < n_tasks; i++){
+        MPI_Irecv(&offset[i - task_id - 1], 1, MPI_INT64_T, i, 20, MPI_COMM_WORLD, &recvOffsetRequest[i - task_id - 1]);
     }
-    MPI_Waitall(task_id, recvOffsetRequest, MPI_STATUSES_IGNORE);
+    MPI_Waitall(n_tasks - task_id - 1, recvOffsetRequest, MPI_STATUSES_IGNORE);
 
     int64_t totalOctreeFileOffset = 0;
 
-    for(int i = task_id - 1; i >= 0; i--){
-        totalOctreeFileOffset += offset[i];
+    for(int i = task_id + 1; i < n_tasks; i++){
+        totalOctreeFileOffset += offset[i - task_id - 1];
+        cout << "Process " << task_id << " received offset " << offset[i - task_id - 1] << " from process " << i << endl;
     }
 
+
     indexer.hierarchyFlusher->flush(hierarchyStepSize, totalOctreeFileOffset);
+
+    if (task_id != MASTER){
+        indexer.writer->closeAndWait();
+    }
 
     printElapsedTime("Indexing completed by process " + std::to_string(task_id) + " in", tStartIndexing);
 
     MPI_Barrier(MPI_COMM_WORLD);
+
     if(task_id == MASTER) {
         auto tStartFinalMerging = now();
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "final merge time");
@@ -2150,17 +2157,15 @@ void doIndexing(string targetDir, State& state, Options& options, Sampler& sampl
 
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "final merge time");
 
-
         indexer.writer->closeAndWait();
 
         //printElapsedTime("flushing", tStart);
-
 
         //string hierarchyPath = targetDir + "/hierarchy.bin";
         //Hierarchy hierarchy = indexer.createHierarchy(hierarchyPath);
         //writeBinaryFile(hierarchyPath, hierarchy.buffer);
 
-        indexer.hierarchyFlusher->flush(hierarchyStepSize, 0);
+        indexer.hierarchyFlusher->flush(hierarchyStepSize, totalOctreeFileOffset);
 
         printElapsedTime("Final merging", tStartFinalMerging);
 
