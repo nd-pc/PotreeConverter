@@ -133,7 +133,7 @@ namespace indexer{
 
 		mutex mtx;
 		string path;
-		unordered_map<string, int> chunks;
+		//unordered_map<string, int> chunks;
 		vector<HNode> buffer;
 
 		HierarchyFlusher(string path){
@@ -243,11 +243,11 @@ namespace indexer{
 				fout.write(buffer.data_char, buffer.size);
 				fout.close();
 
-				if(chunks.find(key) == chunks.end()){
+				/*if(chunks.find(key) == chunks.end()){
 					chunks[key] = 0;
 				}
 
-				chunks[key] += groupedNodes.size();
+				chunks[key] += groupedNodes.size();*/
 			}
 
 		}

@@ -48,8 +48,9 @@ namespace chunker_countsort_laszip {
 	// auto numChunkerThreads = 1;
 	// auto numFlushThreads = 1;
 
-	int maxPointsPerChunk = 5'000'000;
-	int gridSize = 128;
+    int maxPointsPerChunk = 5'000'000;
+    int gridSize = 128;
+
 	mutex mtx_attributes;
 
 	struct Point {
@@ -122,14 +123,348 @@ namespace chunker_countsort_laszip {
 		return double(value);
 	}
 
+    vector<DataFile> curateSources(vector<string> paths) {
 
-	// grid contains index of node in nodes
-	struct NodeLUT {
-		int64_t gridSize;
-		vector<int> grid;
-	};
 
-	vector<std::atomic_int32_t> countPointsInCells(vector<Source> sources, Vector3 min, Vector3 max, int64_t gridSize, State& state, Attributes& outputAttributes, Monitor* monitor) {
+        cout << "#paths: " << paths.size() << endl;
+
+        vector<DataFile> sources;
+        sources.reserve(paths.size());
+
+        mutex mtx;
+        auto parallel = std::execution::par;
+        for_each(parallel, paths.begin(), paths.end(), [&mtx, &sources](string path) {
+
+            auto header = loadLasHeader(path);
+            //auto filesize = fs::file_size(path);
+
+            Vector3 min = { header.min.x, header.min.y, header.min.z };
+            Vector3 max = { header.max.x, header.max.y, header.max.z };
+
+            DataFile source;
+            source.path = path;
+            source.min = min;
+            source.max = max;
+            source.numPoints = header.numPoints;
+            source.filesize = header.numPoints * header.pointDataRecordLength;
+
+            lock_guard<mutex> lock(mtx);
+            sources.push_back(source);
+        });
+
+        return sources;
+    }
+    vector<function<void(int64_t)>> createAttributeHandlers(laszip_header* header, uint8_t* data, laszip_point* point, Attributes& inputAttributes, Attributes& outputAttributes, State &state) {
+
+        vector<function<void(int64_t)>> handlers;
+        int attributeOffset = 0;
+
+        // reset min/max, we're writing the values to a per-thread copy anyway
+        for (auto& attribute : outputAttributes.list) {
+            attribute.min = { Infinity, Infinity, Infinity };
+            attribute.max = { -Infinity, -Infinity, -Infinity };
+        }
+
+        { // STANDARD LAS ATTRIBUTES
+
+            int offsetRGB = outputAttributes.getOffset("rgb");
+            Attribute* attributeRGB = outputAttributes.get("rgb");
+            auto rgb = [data, point, header, offsetRGB, attributeRGB, &state](int64_t offset) {
+                if (offsetRGB >= 0) {
+
+                    uint16_t rgb[] = { 0, 0, 0 };
+                    memcpy(rgb, &point->rgb, 6);
+                    if(state.currentPass == 2)
+                        memcpy(data + offset + offsetRGB, rgb, 6);
+                    if(state.currentPass == 1) {
+                        attributeRGB->min.x = std::min(attributeRGB->min.x, double(rgb[0]));
+                        attributeRGB->min.y = std::min(attributeRGB->min.y, double(rgb[1]));
+                        attributeRGB->min.z = std::min(attributeRGB->min.z, double(rgb[2]));
+
+                        attributeRGB->max.x = std::max(attributeRGB->max.x, double(rgb[0]));
+                        attributeRGB->max.y = std::max(attributeRGB->max.y, double(rgb[1]));
+                        attributeRGB->max.z = std::max(attributeRGB->max.z, double(rgb[2]));
+                    }
+                }
+            };
+
+            int offsetIntensity = outputAttributes.getOffset("intensity");
+            Attribute* attributeIntensity = outputAttributes.get("intensity");
+            auto intensity = [data, point, header, offsetIntensity, attributeIntensity, &state](int64_t offset) {
+                if(state.currentPass == 2)
+                    memcpy(data + offset + offsetIntensity, &point->intensity, 2);
+                if(state.currentPass == 1) {
+                    attributeIntensity->min.x = std::min(attributeIntensity->min.x, double(point->intensity));
+                    attributeIntensity->max.x = std::max(attributeIntensity->max.x, double(point->intensity));
+                    attributeIntensity->max.x = std::max(attributeIntensity->max.x, double(point->intensity));
+                }
+            };
+
+            int offsetReturnNumber = outputAttributes.getOffset("return number");
+            Attribute* attributeReturnNumber = outputAttributes.get("return number");
+            auto returnNumber = [data, point, header, offsetReturnNumber, attributeReturnNumber, &state](int64_t offset) {
+                uint8_t value = point->return_number;
+                if(state.currentPass == 2)
+                    memcpy(data + offset + offsetReturnNumber, &value, 1);
+
+                if(state.currentPass == 1) {
+                    attributeReturnNumber->min.x = std::min(attributeReturnNumber->min.x, double(value));
+                    attributeReturnNumber->max.x = std::max(attributeReturnNumber->max.x, double(value));
+                }
+            };
+
+            int offsetNumberOfReturns = outputAttributes.getOffset("number of returns");
+            Attribute* attributeNumberOfReturns = outputAttributes.get("number of returns");
+            auto numberOfReturns = [data, point, header, offsetNumberOfReturns, attributeNumberOfReturns, &state](int64_t offset) {
+                uint8_t value = point->number_of_returns;
+                if(state.currentPass == 2)
+                    memcpy(data + offset + offsetNumberOfReturns, &value, 1);
+                if(state.currentPass == 1) {
+                    attributeNumberOfReturns->min.x = std::min(attributeNumberOfReturns->min.x, double(value));
+                    attributeNumberOfReturns->max.x = std::max(attributeNumberOfReturns->max.x, double(value));
+                }
+            };
+
+            int offsetScanAngleRank = outputAttributes.getOffset("scan angle rank");
+            Attribute* attributeScanAngleRank = outputAttributes.get("scan angle rank");
+            auto scanAngleRank = [data, point, header, offsetScanAngleRank, attributeScanAngleRank, &state](int64_t offset) {
+                if(state.currentPass == 2)
+                    memcpy(data + offset + offsetScanAngleRank, &point->scan_angle_rank, 1);
+                if(state.currentPass == 1) {
+                    attributeScanAngleRank->min.x = std::min(attributeScanAngleRank->min.x,
+                                                             double(point->scan_angle_rank));
+                    attributeScanAngleRank->max.x = std::max(attributeScanAngleRank->max.x,
+                                                             double(point->scan_angle_rank));
+                }
+            };
+
+            int offsetScanAngle= outputAttributes.getOffset("scan angle");
+            Attribute* attributeScanAngle = outputAttributes.get("scan angle");
+            auto scanAngle = [data, point, header, offsetScanAngle, attributeScanAngle, &state](int64_t offset) {
+                if(state.currentPass == 2)
+                    memcpy(data + offset + offsetScanAngle, &point->extended_scan_angle, 2);
+                if(state.currentPass == 1) {
+                    attributeScanAngle->min.x = std::min(attributeScanAngle->min.x, double(point->extended_scan_angle));
+                    attributeScanAngle->max.x = std::max(attributeScanAngle->max.x, double(point->extended_scan_angle));
+                }
+            };
+
+            int offsetUserData = outputAttributes.getOffset("user data");
+            Attribute* attributeUserData = outputAttributes.get("user data");
+            auto userData = [data, point, header, offsetUserData, attributeUserData, &state](int64_t offset) {
+                if(state.currentPass == 2)
+                    memcpy(data + offset + offsetUserData, &point->user_data, 1);
+                if(state.currentPass == 1) {
+                    attributeUserData->min.x = std::min(attributeUserData->min.x, double(point->user_data));
+                    attributeUserData->max.x = std::max(attributeUserData->max.x, double(point->user_data));
+                }
+            };
+
+            int offsetClassification = outputAttributes.getOffset("classification");
+            Attribute* attributeClassification = outputAttributes.get("classification");
+            auto classification = [data, point, header, offsetClassification, attributeClassification, &state](int64_t offset) {
+
+                uint8_t value = 0;
+                if (point->extended_classification > 31){
+                    value = point->extended_classification;
+                }else{
+                    value = point->classification;
+                }
+
+                if(state.currentPass == 2)
+                    data[offset + offsetClassification] = value;
+                if(state.currentPass == 1) {
+                    attributeClassification->histogram[value]++;
+                    attributeClassification->min.x = std::min(attributeClassification->min.x, double(value));
+                    attributeClassification->max.x = std::max(attributeClassification->max.x, double(value));
+                }
+            };
+
+            int offsetSourceId = outputAttributes.getOffset("point source id");
+            Attribute* attributePointSourceId = outputAttributes.get("point source id");
+            auto pointSourceId = [data, point, header, offsetSourceId, attributePointSourceId, &state](int64_t offset) {
+                if(state.currentPass == 2)
+                    memcpy(data + offset + offsetSourceId, &point->point_source_ID, 2);
+                if(state.currentPass == 1) {
+                    attributePointSourceId->min.x = std::min(attributePointSourceId->min.x,
+                                                             double(point->point_source_ID));
+                    attributePointSourceId->max.x = std::max(attributePointSourceId->max.x,
+                                                             double(point->point_source_ID));
+                }
+            };
+
+            int offsetGpsTime= outputAttributes.getOffset("gps-time");
+            Attribute* attributeGpsTime = outputAttributes.get("gps-time");
+            auto gpsTime = [data, point, header, offsetGpsTime, attributeGpsTime, &state](int64_t offset) {
+                if(state.currentPass == 2)
+                    memcpy(data + offset + offsetGpsTime, &point->gps_time, 8);
+                if(state.currentPass == 1) {
+                    attributeGpsTime->min.x = std::min(attributeGpsTime->min.x, point->gps_time);
+                    attributeGpsTime->max.x = std::max(attributeGpsTime->max.x, point->gps_time);
+                }
+            };
+
+            int offsetClassificationFlags = outputAttributes.getOffset("classification flags");
+            Attribute* attributeClassificationFlags = outputAttributes.get("classification flags");
+            auto classificationFlags = [data, point, header, offsetClassificationFlags, attributeClassificationFlags, &state](int64_t offset) {
+                uint8_t value = point->extended_classification_flags;
+                if(state.currentPass == 2)
+                    memcpy(data + offset + offsetClassificationFlags, &value, 1);
+                if(state.currentPass == 1) {
+                    attributeClassificationFlags->min.x = std::min(attributeClassificationFlags->min.x,
+                                                                   double(point->extended_classification_flags));
+                    attributeClassificationFlags->max.x = std::max(attributeClassificationFlags->max.x,
+                                                                   double(point->extended_classification_flags));
+                }
+            };
+
+            unordered_map<string, function<void(int64_t)>> mapping = {
+                    {"rgb", rgb},
+                    {"intensity", intensity},
+                    {"return number", returnNumber},
+                    {"number of returns", numberOfReturns},
+                    {"classification", classification},
+                    {"scan angle rank", scanAngleRank},
+                    {"scan angle", scanAngle},
+                    {"user data", userData},
+                    {"point source id", pointSourceId},
+                    {"gps-time", gpsTime},
+                    {"classification flags", classificationFlags},
+            };
+
+            for (auto& attribute : inputAttributes.list) {
+
+                attributeOffset += attribute.size;
+
+                if (attribute.name == "position") {
+                    continue;
+                }
+
+                bool standardMappingExists = mapping.find(attribute.name) != mapping.end();
+                bool isIncludedInOutput = outputAttributes.get(attribute.name) != nullptr;
+                if (standardMappingExists && isIncludedInOutput) {
+                    handlers.push_back(mapping[attribute.name]);
+                }
+            }
+        }
+
+        { // EXTRA ATTRIBUTES
+
+            // mapping from las format to index of first extra attribute
+            // +1 for all formats with returns, which is split into return number and number of returns
+            unordered_map<int, int> formatToExtraIndex = {
+                    {0, 8},
+                    {1, 9},
+                    {2, 9},
+                    {3, 10},
+                    {4, 14},
+                    {5, 15},
+                    {6, 10},
+                    {7, 11},
+            };
+
+            bool noMapping = formatToExtraIndex.find(header->point_data_format) == formatToExtraIndex.end();
+            if (noMapping) {
+                string msg = "ERROR: las format not supported: " + formatNumber(header->point_data_format) + "\n";
+                cout << msg;
+
+                exit(123);
+            }
+
+            // handle extra bytes individually to compute per-attribute information
+            int firstExtraIndex = formatToExtraIndex[header->point_data_format];
+            int sourceOffset = 0;
+
+            int attributeOffset = 0;
+            for (int i = 0; i < firstExtraIndex; i++) {
+                attributeOffset += inputAttributes.list[i].size;
+            }
+
+            for (int i = firstExtraIndex; i < inputAttributes.list.size(); i++) {
+                Attribute& inputAttribute = inputAttributes.list[i];
+                Attribute* attribute = outputAttributes.get(inputAttribute.name);
+                int targetOffset = outputAttributes.getOffset(inputAttribute.name);
+
+                int attributeSize = inputAttribute.size;
+
+                if (attribute != nullptr) {
+                    auto handleAttribute = [data, point, header, attributeSize, attributeOffset, sourceOffset, attribute, &state](int64_t offset) {
+                        if (state.currentPass == 2)
+                            memcpy(data + offset + attributeOffset, point->extra_bytes + sourceOffset, attributeSize);
+
+                        if (state.currentPass == 1) {
+                            std::function<double(uint8_t *)> f;
+
+                            // TODO: shouldn't use DOUBLE as a unifying type
+                            // it won't work with uint64_t and int64_t
+                            if (attribute->type == AttributeType::INT8) {
+                                f = asDouble<int8_t>;
+                            } else if (attribute->type == AttributeType::INT16) {
+                                f = asDouble<int16_t>;
+                            } else if (attribute->type == AttributeType::INT32) {
+                                f = asDouble<int32_t>;
+                            } else if (attribute->type == AttributeType::INT64) {
+                                f = asDouble<int64_t>;
+                            } else if (attribute->type == AttributeType::UINT8) {
+                                f = asDouble<uint8_t>;
+                            } else if (attribute->type == AttributeType::UINT16) {
+                                f = asDouble<uint16_t>;
+                            } else if (attribute->type == AttributeType::UINT32) {
+                                f = asDouble<uint32_t>;
+                            } else if (attribute->type == AttributeType::UINT64) {
+                                f = asDouble<uint64_t>;
+                            } else if (attribute->type == AttributeType::FLOAT) {
+                                f = asDouble<float>;
+                            } else if (attribute->type == AttributeType::DOUBLE) {
+                                f = asDouble<double>;
+                            }
+
+                            if (attribute->numElements == 1) {
+                                double x = f(point->extra_bytes + sourceOffset);
+
+                                attribute->min.x = std::min(attribute->min.x, x);
+                                attribute->max.x = std::max(attribute->max.x, x);
+                            } else if (attribute->numElements == 2) {
+                                double x = f(point->extra_bytes + sourceOffset + 0 * attribute->elementSize);
+                                double y = f(point->extra_bytes + sourceOffset + 1 * attribute->elementSize);
+
+                                attribute->min.x = std::min(attribute->min.x, x);
+                                attribute->min.y = std::min(attribute->min.y, y);
+                                attribute->max.x = std::max(attribute->max.x, x);
+                                attribute->max.y = std::max(attribute->max.y, y);
+
+                            } else if (attribute->numElements == 3) {
+                                double x = f(point->extra_bytes + sourceOffset + 0 * attribute->elementSize);
+                                double y = f(point->extra_bytes + sourceOffset + 1 * attribute->elementSize);
+                                double z = f(point->extra_bytes + sourceOffset + 2 * attribute->elementSize);
+
+                                attribute->min.x = std::min(attribute->min.x, x);
+                                attribute->min.y = std::min(attribute->min.y, y);
+                                attribute->min.z = std::min(attribute->min.z, z);
+                                attribute->max.x = std::max(attribute->max.x, x);
+                                attribute->max.y = std::max(attribute->max.y, y);
+                                attribute->max.z = std::max(attribute->max.z, z);
+                            }
+                        }
+
+
+                    };
+
+                    handlers.push_back(handleAttribute);
+                }
+
+                sourceOffset += attribute->size;
+                attributeOffset += attribute->size;
+            }
+
+        }
+
+
+        return handlers;
+
+    }
+
+	void countPointsInCells(vector<DataFile> sources, Vector3 min, Vector3 max, vector<std::atomic_int32_t>& grid, int64_t gridSize, State& state, Attributes& outputAttributes, Monitor* monitor) {
 
 		cout << endl;
 		cout << "=======================================" << endl;
@@ -140,7 +475,7 @@ namespace chunker_countsort_laszip {
 
 		//Vector3 size = max - min;
 
-		vector<std::atomic_int32_t> grid(gridSize * gridSize * gridSize);
+
 
 		struct Task{
 			string path;
@@ -154,6 +489,7 @@ namespace chunker_countsort_laszip {
 			Vector3 offset;
 			Vector3 min;
 			Vector3 max;
+            Attributes inputAttributes;
 		};
 
 		auto processor = [gridSize, &grid, tStart, &state, &outputAttributes, monitor](shared_ptr<Task> task){
@@ -170,6 +506,8 @@ namespace chunker_countsort_laszip {
 			//Vector3 offset = task->offset;
 			Vector3 min = task->min;
 			Vector3 max = task->max;
+
+            Attributes inputAttributes = task->inputAttributes;
 
 			stringstream ss;
 			ss << "counting " << fs::path(task->path).filename().string() 
@@ -196,80 +534,129 @@ namespace chunker_countsort_laszip {
 				bufferSize = numBytes;
 			}
 
+            uint8_t* data = nullptr;
             //
-			laszip_POINTER laszip_reader;
-			{
-				laszip_BOOL is_compressed = iEndsWith(path, ".laz") ? 1 : 0;
-				laszip_BOOL request_reader = 1;
 
-				laszip_create(&laszip_reader);
-				laszip_request_compatibility_mode(laszip_reader, request_reader);
-				laszip_open_reader(laszip_reader, path.c_str(), &is_compressed);
-				laszip_seek_point(laszip_reader, task->firstPoint);
-			}
+            // per-thread copy of outputAttributes to compute min/max in a thread-safe way
+            // will be merged to global outputAttributes instance at the end of this function
+            Attributes outputAttributesCopy = outputAttributes;
 
-			double cubeSize = (max - min).max();
-			Vector3 size = { cubeSize, cubeSize, cubeSize };
-			max = min + cubeSize;
+            for(auto& attribute: outputAttributesCopy.list){
+                if(attribute.name == "classification"){
+                    for(int i = 0; i < attribute.histogram.size(); i++){
+                        attribute.histogram[i] = 0;
+                    }
+                }
+            }
 
-			double dGridSize = double(gridSize);
+            {
+                laszip_POINTER laszip_reader;
+                laszip_header *header;
+                laszip_point *point;
 
-			double coordinates[3];
+                laszip_BOOL is_compressed = iEndsWith(path, ".laz") ? 1 : 0;
+                laszip_BOOL request_reader = 1;
 
-			auto posScale = outputAttributes.posScale;
-			auto posOffset = outputAttributes.posOffset;
+                laszip_create(&laszip_reader);
+                laszip_request_compatibility_mode(laszip_reader, request_reader);
+                laszip_open_reader(laszip_reader, path.c_str(), &is_compressed);
+                laszip_get_header_pointer(laszip_reader, &header);
+                laszip_get_point_pointer(laszip_reader, &point);
+                laszip_seek_point(laszip_reader, task->firstPoint);
+                auto attributeHandlers = createAttributeHandlers(header, data, point, inputAttributes,
+                                                                 outputAttributesCopy, state);
 
-            // for ecah point determine the cell of the grid it belongs and increment it
-			for (int i = 0; i < numToRead; i++) {
-				int64_t pointOffset = i * bpp;
 
-				laszip_read_point(laszip_reader);
-				laszip_get_coordinates(laszip_reader, coordinates);
+                double cubeSize = (max - min).max();
+                Vector3 size = {cubeSize, cubeSize, cubeSize};
+                max = min + cubeSize;
 
-				{
-					// transfer las integer coordinates to new scale/offset/box values
-					double x = coordinates[0];
-					double y = coordinates[1];
-					double z = coordinates[2];
+                double dGridSize = double(gridSize);
 
-					int32_t X = int32_t((x - posOffset.x) / posScale.x);
-					int32_t Y = int32_t((y - posOffset.y) / posScale.y);
-					int32_t Z = int32_t((z - posOffset.z) / posScale.z);
+                double coordinates[3];
 
-					double ux = (double(X) * posScale.x + posOffset.x - min.x) / size.x;
-					double uy = (double(Y) * posScale.y + posOffset.y - min.y) / size.y;
-					double uz = (double(Z) * posScale.z + posOffset.z - min.z) / size.z;
+                auto posScale = outputAttributes.posScale;
+                auto posOffset = outputAttributes.posOffset;
 
-					bool inBox = ux >= 0.0 && uy >= 0.0 && uz >= 0.0;
-					inBox = inBox && ux <= 1.0 && uy <= 1.0 && uz <= 1.0;
+                // for ecah point determine the cell of the grid it belongs and increment it
+                for (int i = 0; i < numToRead; i++) {
+                    int64_t pointOffset = i * bpp;
 
-					if (!inBox) {
-						stringstream ss;
-						ss << "encountered point outside bounding box." << endl;
-						ss << "box.min: " << min.toString() << endl;
-						ss << "box.max: " << max.toString() << endl;
-						ss << "point: " << Vector3(x, y, z).toString() << endl;
-						ss << "file: " << path << endl;
-						ss << "PotreeConverter requires a valid bounding box to operate." << endl;
-						ss << "Please try to repair the bounding box, e.g. using lasinfo with the -repair_bb argument." << endl;
-						logger::ERROR(ss.str());
+                    laszip_read_point(laszip_reader);
+                    laszip_get_coordinates(laszip_reader, coordinates);
 
-						exit(123);
-					}
+                    {
+                        // transfer las integer coordinates to new scale/offset/box values
+                        double x = coordinates[0];
+                        double y = coordinates[1];
+                        double z = coordinates[2];
 
-					int64_t ix = int64_t(std::min(dGridSize * ux, dGridSize - 1.0));
-					int64_t iy = int64_t(std::min(dGridSize * uy, dGridSize - 1.0));
-					int64_t iz = int64_t(std::min(dGridSize * uz, dGridSize - 1.0));
+                        int32_t X = int32_t((x - posOffset.x) / posScale.x);
+                        int32_t Y = int32_t((y - posOffset.y) / posScale.y);
+                        int32_t Z = int32_t((z - posOffset.z) / posScale.z);
 
-					int64_t index = ix + iy * gridSize + iz * gridSize * gridSize;
+                        double ux = (double(X) * posScale.x + posOffset.x - min.x) / size.x;
+                        double uy = (double(Y) * posScale.y + posOffset.y - min.y) / size.y;
+                        double uz = (double(Z) * posScale.z + posOffset.z - min.z) / size.z;
 
-					grid[index]++;
-				}
+                        bool inBox = ux >= 0.0 && uy >= 0.0 && uz >= 0.0;
+                        inBox = inBox && ux <= 1.0 && uy <= 1.0 && uz <= 1.0;
 
-			}
+                        if (!inBox) {
+                            stringstream ss;
+                            ss << "encountered point outside bounding box." << endl;
+                            ss << "box.min: " << min.toString() << endl;
+                            ss << "box.max: " << max.toString() << endl;
+                            ss << "point: " << Vector3(x, y, z).toString() << endl;
+                            ss << "file: " << path << endl;
+                            ss << "PotreeConverter requires a valid bounding box to operate." << endl;
+                            ss
+                                    << "Please try to repair the bounding box, e.g. using lasinfo with the -repair_bb argument."
+                                    << endl;
+                            logger::ERROR(ss.str());
 
-			laszip_close_reader(laszip_reader);
-			laszip_destroy(laszip_reader);
+                            exit(123);
+                        }
+
+                        int64_t ix = int64_t(std::min(dGridSize * ux, dGridSize - 1.0));
+                        int64_t iy = int64_t(std::min(dGridSize * uy, dGridSize - 1.0));
+                        int64_t iz = int64_t(std::min(dGridSize * uz, dGridSize - 1.0));
+
+                        int64_t index = ix + iy * gridSize + iz * gridSize * gridSize;
+
+                        grid[index]++;
+                    }
+
+                    // for each attribute, compute min/max and histogram
+                    for (auto& handler : attributeHandlers) {
+                        handler(pointOffset);
+                    }
+
+                }
+
+                laszip_close_reader(laszip_reader);
+                laszip_destroy(laszip_reader);
+            }
+            // merge attribute metadata of this batch into global attribute metadata
+            for (int i = 0; i < outputAttributesCopy.list.size(); i++) {
+                Attribute& source = outputAttributesCopy.list[i];
+                Attribute& target = outputAttributes.list[i];
+
+                lock_guard<mutex> lock(mtx_attributes);
+                target.min.x = std::min(target.min.x, source.min.x);
+                target.min.y = std::min(target.min.y, source.min.y);
+                target.min.z = std::min(target.min.z, source.min.z);
+
+                target.max.x = std::max(target.max.x, source.max.x);
+                target.max.y = std::max(target.max.y, source.max.y);
+                target.max.z = std::max(target.max.z, source.max.z);
+
+                // target.mask = target.mask | source.mask;
+
+                for(int j = 0; j < target.histogram.size(); j++){
+                    target.histogram[j] = target.histogram[j] + source.histogram[j];
+                }
+            }
 
 			static int64_t pointsProcessed = 0;
 			pointsProcessed += task->numPoints;
@@ -312,6 +699,9 @@ namespace chunker_countsort_laszip {
 			int64_t batchSize = 1'000'000;
 			int64_t numRead = 0;
 
+            vector<DataFile> tmpSources = { source };
+            Attributes inputAttributes = computeOutputAttributes(tmpSources, {});
+
 			while (pointsLeft > 0) {
 
 				int64_t numToRead;
@@ -349,6 +739,8 @@ namespace chunker_countsort_laszip {
                 task->min = min;
 				task->max = max;
 
+                task->inputAttributes = inputAttributes;
+
                 // there are numProcessors in the pool
 				pool.addTask(task);
 
@@ -377,7 +769,7 @@ namespace chunker_countsort_laszip {
 		}
 
 
-		return std::move(grid);
+		return;
 	}
 
 	void addBuckets(string targetDir, vector<shared_ptr<Buffer>>& newBuckets) {
@@ -397,285 +789,8 @@ namespace chunker_countsort_laszip {
 		}
 	}
 
-	vector<function<void(int64_t)>> createAttributeHandlers(laszip_header* header, uint8_t* data, laszip_point* point, Attributes& inputAttributes, Attributes& outputAttributes) {
-
-		vector<function<void(int64_t)>> handlers;
-		int attributeOffset = 0;
-
-		// reset min/max, we're writing the values to a per-thread copy anyway
-		for (auto& attribute : outputAttributes.list) {
-			attribute.min = { Infinity, Infinity, Infinity };
-			attribute.max = { -Infinity, -Infinity, -Infinity };
-		}
-
-		{ // STANDARD LAS ATTRIBUTES
-
-			int offsetRGB = outputAttributes.getOffset("rgb");
-			Attribute* attributeRGB = outputAttributes.get("rgb");
-			auto rgb = [data, point, header, offsetRGB, attributeRGB](int64_t offset) {
-				if (offsetRGB >= 0) {
-
-					uint16_t rgb[] = { 0, 0, 0 };
-					memcpy(rgb, &point->rgb, 6);
-					memcpy(data + offset + offsetRGB, rgb, 6);
-					
-					attributeRGB->min.x = std::min(attributeRGB->min.x, double(rgb[0]));
-					attributeRGB->min.y = std::min(attributeRGB->min.y, double(rgb[1]));
-					attributeRGB->min.z = std::min(attributeRGB->min.z, double(rgb[2]));
-
-					attributeRGB->max.x = std::max(attributeRGB->max.x, double(rgb[0]));
-					attributeRGB->max.y = std::max(attributeRGB->max.y, double(rgb[1]));
-					attributeRGB->max.z = std::max(attributeRGB->max.z, double(rgb[2]));
-				}
-			};
-
-			int offsetIntensity = outputAttributes.getOffset("intensity");
-			Attribute* attributeIntensity = outputAttributes.get("intensity");
-			auto intensity = [data, point, header, offsetIntensity, attributeIntensity](int64_t offset) {
-				memcpy(data + offset + offsetIntensity, &point->intensity, 2);
-
-				attributeIntensity->min.x = std::min(attributeIntensity->min.x, double(point->intensity));
-				attributeIntensity->max.x = std::max(attributeIntensity->max.x, double(point->intensity));
-			};
-
-			int offsetReturnNumber = outputAttributes.getOffset("return number");
-			Attribute* attributeReturnNumber = outputAttributes.get("return number");
-			auto returnNumber = [data, point, header, offsetReturnNumber, attributeReturnNumber](int64_t offset) {
-				uint8_t value = point->return_number;
-
-				memcpy(data + offset + offsetReturnNumber, &value, 1);
-
-				attributeReturnNumber->min.x = std::min(attributeReturnNumber->min.x, double(value));
-				attributeReturnNumber->max.x = std::max(attributeReturnNumber->max.x, double(value));
-			};
-
-			int offsetNumberOfReturns = outputAttributes.getOffset("number of returns");
-			Attribute* attributeNumberOfReturns = outputAttributes.get("number of returns");
-			auto numberOfReturns = [data, point, header, offsetNumberOfReturns, attributeNumberOfReturns](int64_t offset) {
-				uint8_t value = point->number_of_returns;
-
-				memcpy(data + offset + offsetNumberOfReturns, &value, 1);
-
-				attributeNumberOfReturns->min.x = std::min(attributeNumberOfReturns->min.x, double(value));
-				attributeNumberOfReturns->max.x = std::max(attributeNumberOfReturns->max.x, double(value));
-			};
-
-			int offsetScanAngleRank = outputAttributes.getOffset("scan angle rank");
-			Attribute* attributeScanAngleRank = outputAttributes.get("scan angle rank");
-			auto scanAngleRank = [data, point, header, offsetScanAngleRank, attributeScanAngleRank](int64_t offset) {
-				memcpy(data + offset + offsetScanAngleRank, &point->scan_angle_rank, 1);
-
-				attributeScanAngleRank->min.x = std::min(attributeScanAngleRank->min.x, double(point->scan_angle_rank));
-				attributeScanAngleRank->max.x = std::max(attributeScanAngleRank->max.x, double(point->scan_angle_rank));
-			};
-
-			int offsetScanAngle= outputAttributes.getOffset("scan angle");
-			Attribute* attributeScanAngle = outputAttributes.get("scan angle");
-			auto scanAngle = [data, point, header, offsetScanAngle, attributeScanAngle](int64_t offset) {
-				memcpy(data + offset + offsetScanAngle, &point->extended_scan_angle, 2);
-
-				attributeScanAngle->min.x = std::min(attributeScanAngle->min.x, double(point->extended_scan_angle));
-				attributeScanAngle->max.x = std::max(attributeScanAngle->max.x, double(point->extended_scan_angle));
-			};
-
-			int offsetUserData = outputAttributes.getOffset("user data");
-			Attribute* attributeUserData = outputAttributes.get("user data");
-			auto userData = [data, point, header, offsetUserData, attributeUserData](int64_t offset) {
-				memcpy(data + offset + offsetUserData, &point->user_data, 1);
-
-				attributeUserData->min.x = std::min(attributeUserData->min.x, double(point->user_data));
-				attributeUserData->max.x = std::max(attributeUserData->max.x, double(point->user_data));
-			};
-
-			int offsetClassification = outputAttributes.getOffset("classification");
-			Attribute* attributeClassification = outputAttributes.get("classification");
-			auto classification = [data, point, header, offsetClassification, attributeClassification](int64_t offset) {
-				
-				uint8_t value = 0;
-				if (point->extended_classification > 31){
-					value = point->extended_classification;
-				}else{
-					value = point->classification;
-				}
-
-				data[offset + offsetClassification] = value;
-				attributeClassification->histogram[value]++;
-
-				attributeClassification->min.x = std::min(attributeClassification->min.x, double(value));
-				attributeClassification->max.x = std::max(attributeClassification->max.x, double(value));
-			};
-
-			int offsetSourceId = outputAttributes.getOffset("point source id");
-			Attribute* attributePointSourceId = outputAttributes.get("point source id");
-			auto pointSourceId = [data, point, header, offsetSourceId, attributePointSourceId](int64_t offset) {
-				memcpy(data + offset + offsetSourceId, &point->point_source_ID, 2);
-
-				attributePointSourceId->min.x = std::min(attributePointSourceId->min.x, double(point->point_source_ID));
-				attributePointSourceId->max.x = std::max(attributePointSourceId->max.x, double(point->point_source_ID));
-			};
-
-			int offsetGpsTime= outputAttributes.getOffset("gps-time");
-			Attribute* attributeGpsTime = outputAttributes.get("gps-time");
-			auto gpsTime = [data, point, header, offsetGpsTime, attributeGpsTime](int64_t offset) {
-				memcpy(data + offset + offsetGpsTime, &point->gps_time, 8);
-
-				attributeGpsTime->min.x = std::min(attributeGpsTime->min.x, point->gps_time);
-				attributeGpsTime->max.x = std::max(attributeGpsTime->max.x, point->gps_time);
-			};
-
-			int offsetClassificationFlags = outputAttributes.getOffset("classification flags");
-			Attribute* attributeClassificationFlags = outputAttributes.get("classification flags");
-			auto classificationFlags = [data, point, header, offsetClassificationFlags, attributeClassificationFlags](int64_t offset) {
-				uint8_t value = point->extended_classification_flags;
-
-				memcpy(data + offset + offsetClassificationFlags, &value, 1);
-
-				attributeClassificationFlags->min.x = std::min(attributeClassificationFlags->min.x, double(point->extended_classification_flags));
-				attributeClassificationFlags->max.x = std::max(attributeClassificationFlags->max.x, double(point->extended_classification_flags));
-			};
-
-			unordered_map<string, function<void(int64_t)>> mapping = {
-				{"rgb", rgb},
-				{"intensity", intensity},
-				{"return number", returnNumber},
-				{"number of returns", numberOfReturns},
-				{"classification", classification},
-				{"scan angle rank", scanAngleRank},
-				{"scan angle", scanAngle},
-				{"user data", userData},
-				{"point source id", pointSourceId},
-				{"gps-time", gpsTime},
-				{"classification flags", classificationFlags},
-			};
-
-			for (auto& attribute : inputAttributes.list) {
-
-				attributeOffset += attribute.size;
-
-				if (attribute.name == "position") {
-					continue;
-				}
-
-				bool standardMappingExists = mapping.find(attribute.name) != mapping.end();
-				bool isIncludedInOutput = outputAttributes.get(attribute.name) != nullptr;
-				if (standardMappingExists && isIncludedInOutput) {
-					handlers.push_back(mapping[attribute.name]);
-				}
-			}
-		}
-
-		{ // EXTRA ATTRIBUTES
-
-			// mapping from las format to index of first extra attribute
-			// +1 for all formats with returns, which is split into return number and number of returns
-			unordered_map<int, int> formatToExtraIndex = {
-				{0, 8},
-				{1, 9},
-				{2, 9},
-				{3, 10},
-				{4, 14},
-				{5, 15},
-				{6, 10},
-				{7, 11},
-			};
-
-			bool noMapping = formatToExtraIndex.find(header->point_data_format) == formatToExtraIndex.end();
-			if (noMapping) {
-				string msg = "ERROR: las format not supported: " + formatNumber(header->point_data_format) + "\n";
-				cout << msg;
-
-				exit(123);
-			}
-
-			// handle extra bytes individually to compute per-attribute information
-			int firstExtraIndex = formatToExtraIndex[header->point_data_format];
-			int sourceOffset = 0;
-
-			int attributeOffset = 0;
-			for (int i = 0; i < firstExtraIndex; i++) {
-				attributeOffset += inputAttributes.list[i].size;
-			}
-
-			for (int i = firstExtraIndex; i < inputAttributes.list.size(); i++) {
-				Attribute& inputAttribute = inputAttributes.list[i];
-				Attribute* attribute = outputAttributes.get(inputAttribute.name);
-				int targetOffset = outputAttributes.getOffset(inputAttribute.name);
-
-				int attributeSize = inputAttribute.size;
-
-				if (attribute != nullptr) {
-					auto handleAttribute = [data, point, header, attributeSize, attributeOffset, sourceOffset, attribute](int64_t offset) {
-						memcpy(data + offset + attributeOffset, point->extra_bytes + sourceOffset, attributeSize);
-
-						std::function<double(uint8_t*)> f;
-
-						// TODO: shouldn't use DOUBLE as a unifying type
-						// it won't work with uint64_t and int64_t
-						if (attribute->type == AttributeType::INT8) {
-							f = asDouble<int8_t>;
-						} else if (attribute->type == AttributeType::INT16) {
-							f = asDouble<int16_t>;
-						} else if (attribute->type == AttributeType::INT32) {
-							f = asDouble<int32_t>;
-						} else if (attribute->type == AttributeType::INT64) {
-							f = asDouble<int64_t>;
-						} else if (attribute->type == AttributeType::UINT8) {
-							f = asDouble<uint8_t>;
-						} else if (attribute->type == AttributeType::UINT16) {
-							f = asDouble<uint16_t>;
-						} else if (attribute->type == AttributeType::UINT32) {
-							f = asDouble<uint32_t>;
-						} else if (attribute->type == AttributeType::UINT64) {
-							f = asDouble<uint64_t>;
-						} else if (attribute->type == AttributeType::FLOAT) {
-							f = asDouble<float>;
-						} else if (attribute->type == AttributeType::DOUBLE) {
-							f = asDouble<double>;
-						}
-
-						if (attribute->numElements == 1) {
-							double x = f(point->extra_bytes + sourceOffset);
-
-							attribute->min.x = std::min(attribute->min.x, x);
-							attribute->max.x = std::max(attribute->max.x, x);
-						} else if (attribute->numElements == 2) {
-							double x = f(point->extra_bytes + sourceOffset + 0 * attribute->elementSize);
-							double y = f(point->extra_bytes + sourceOffset + 1 * attribute->elementSize);
-
-							attribute->min.x = std::min(attribute->min.x, x);
-							attribute->min.y = std::min(attribute->min.y, y);
-							attribute->max.x = std::max(attribute->max.x, x);
-							attribute->max.y = std::max(attribute->max.y, y);
-
-						} else if (attribute->numElements == 3) {
-							double x = f(point->extra_bytes + sourceOffset + 0 * attribute->elementSize);
-							double y = f(point->extra_bytes + sourceOffset + 1 * attribute->elementSize);
-							double z = f(point->extra_bytes + sourceOffset + 2 * attribute->elementSize);
-
-							attribute->min.x = std::min(attribute->min.x, x);
-							attribute->min.y = std::min(attribute->min.y, y);
-							attribute->min.z = std::min(attribute->min.z, z);
-							attribute->max.x = std::max(attribute->max.x, x);
-							attribute->max.y = std::max(attribute->max.y, y);
-							attribute->max.z = std::max(attribute->max.z, z);
-						}
 
 
-					};
-
-					handlers.push_back(handleAttribute);
-				}
-
-				sourceOffset += attribute->size;
-				attributeOffset += attribute->size;
-			}
-
-		}
-
-
-		return handlers;
-
-	}
 
 	void distributePoints(vector<Source> sources, Vector3 min, Vector3 max, string targetDir, NodeLUT& lut, State& state, Attributes& outputAttributes, Monitor* monitor) {
 
@@ -783,11 +898,12 @@ namespace chunker_countsort_laszip {
 
 				laszip_seek_point(laszip_reader, task->firstPoint);
 				
-				auto attributeHandlers = createAttributeHandlers(header, data, point, inputAttributes, outputAttributesCopy);
+				auto attributeHandlers = createAttributeHandlers(header, data, point, inputAttributes, outputAttributesCopy, state);
 
 				double coordinates[3];
 				auto aPosition = outputAttributesCopy.get("position");
 
+                //
 				for (int64_t i = 0; i < batchSize; i++) {
 					laszip_read_point(laszip_reader);
 					laszip_get_coordinates(laszip_reader, coordinates);
@@ -931,26 +1047,26 @@ namespace chunker_countsort_laszip {
 			auto tAddBuckets = now();
 			addBuckets(targetDir, buckets);
 
-			// merge attribute metadata of this batch into global attribute metadata
-			for (int i = 0; i < outputAttributesCopy.list.size(); i++) {
-				Attribute& source = outputAttributesCopy.list[i];
-				Attribute& target = outputAttributes.list[i];
-
-				lock_guard<mutex> lock(mtx_attributes);
-				target.min.x = std::min(target.min.x, source.min.x);
-				target.min.y = std::min(target.min.y, source.min.y);
-				target.min.z = std::min(target.min.z, source.min.z);
-
-				target.max.x = std::max(target.max.x, source.max.x);
-				target.max.y = std::max(target.max.y, source.max.y);
-				target.max.z = std::max(target.max.z, source.max.z);
-
-				// target.mask = target.mask | source.mask;
-				
-				for(int j = 0; j < target.histogram.size(); j++){
-					target.histogram[j] = target.histogram[j] + source.histogram[j];
-				}
-			}
+//			// merge attribute metadata of this batch into global attribute metadata
+//			for (int i = 0; i < outputAttributesCopy.list.size(); i++) {
+//				Attribute& source = outputAttributesCopy.list[i];
+//				Attribute& target = outputAttributes.list[i];
+//
+//				lock_guard<mutex> lock(mtx_attributes);
+//				target.min.x = std::min(target.min.x, source.min.x);
+//				target.min.y = std::min(target.min.y, source.min.y);
+//				target.min.z = std::min(target.min.z, source.min.z);
+//
+//				target.max.x = std::max(target.max.x, source.max.x);
+//				target.max.y = std::max(target.max.y, source.max.y);
+//				target.max.z = std::max(target.max.z, source.max.z);
+//
+//				// target.mask = target.mask | source.mask;
+//
+//				for(int j = 0; j < target.histogram.size(); j++){
+//					target.histogram[j] = target.histogram[j] + source.histogram[j];
+//				}
+//			}
 
             RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "distribute time");
 		};
@@ -976,7 +1092,7 @@ namespace chunker_countsort_laszip {
 			int64_t maxBatchSize = 1'000'000;
 			int64_t numRead = 0;
 
-			vector<Source> tmpSources = { source };
+			vector<DataFile> tmpSources = { source };
 			Attributes inputAttributes = computeOutputAttributes(tmpSources, {});
 
 			while (pointsLeft > 0) {
@@ -1234,7 +1350,7 @@ namespace chunker_countsort_laszip {
 		return {gridSize, lut};
 	}
 
-	void doChunking(vector<Source> sources, string targetDir, Vector3 min, Vector3 max, State& state, Attributes outputAttributes, Monitor* monitor) {
+	void doChunking(Vector3 min, Vector3 max, State& state, Attributes outputAttributes, Monitor* monitor) {
 
 		auto tStart = now();
 
@@ -1252,24 +1368,60 @@ namespace chunker_countsort_laszip {
 			gridSize = 512;
 		}
 
+        vector<std::atomic_int32_t> grid(gridSize * gridSize * gridSize);
 		state.currentPass = 1;
 
-		{ // prepare/clean target directories
-			string dir = targetDir + "/chunks";
-			//fs::create_directories(dir);
+        int batchNum = 1;
+        double countingTime = 0.0;
+        double actualCountingTime = 0.0;
+        double tStartTotalCounting = now();
+        while (!fstream("../.nomorefilesleftforcounting.txt").good()) {
+            // cout << "waiting for file" << endl;
+            while (!fstream("../.batchno" + to_string(batchNum) + "copied.txt").good()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            fstream batchfiles;
+            batchfiles.open("../.batchno" + to_string(batchNum) + "copied.txt", ios::in);
+            string lazFiles;
+            getline(batchfiles, lazFiles);
 
-			for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-				std::filesystem::remove(entry);
-			}
-		}
+            vector<string> lazFilesVec = splitString(" ", lazFiles);
+
+            auto sources = curateSources(lazFilesVec);
+
+            batchfiles.close();
+
+            fs::remove(fs::path("../.batchno" + to_string(batchNum) + "copied.txt"));
 
 
-		// COUNT: this function determines the cell to which a point belongs in a grid of gridSize x gridSize x gridSize and increments it.
-        // For large data s AHN3 the grid is 512 x 512 x 512
 
-        auto tStartCount = now();
-		auto grid = countPointsInCells(sources, min, max, gridSize, state, outputAttributes, monitor);
-        printElapsedTime("countPointsInCells", tStartCount);
+
+
+            // COUNT: this function determines the cell to which a point belongs in a grid of gridSize x gridSize x gridSize and increments it.
+            // For large data s AHN3 the grid is 512 x 512 x 512
+
+            fstream signalToCopier;
+            signalToCopier.open("../.countingstartedforbatchno" + to_string(batchNum) + ".txt", ios::out);
+            signalToCopier << to_string(countingTime) << endl;
+            signalToCopier.close();
+            batchNum++;
+            auto tStartCount = now();
+            countPointsInCells(sources, min, max, grid, gridSize,
+                                                         state,
+                                                         outputAttributes, monitor);
+            countingTime = printElapsedTime("countPointsInCells", tStartCount);
+            actualCountingTime += countingTime;
+
+
+        }
+        printElapsedTime("Total counting time including wait time in cp/remove of source files", tStartTotalCounting);
+        cout << "Actual counting time excluding wait time in cp/remove of source files" << actualCountingTime << endl;
+
+        fs::remove(fs::path("../.nomorefilesleftforcounting.txt"));
+        auto tStartMerge = now();
+        auto lut = createLUT(grid, gridSize);
+        printElapsedTime("createLUT", tStartMerge);
+
 
 		{ // DISTIRBUTE
 			auto tStartDistribute = now();

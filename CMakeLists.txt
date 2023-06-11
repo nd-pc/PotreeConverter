@@ -15,7 +15,7 @@ set(target PotreeConverterMPI)
 
 set(HEADER_FILES  
 	./Converter/include/Attributes.h
-	./Converter/include/chunker_countsort_laszip.h
+		Converter/include/chunker_countsort_laszip.h
 	./Converter/include/ChunkRefiner.h
 	./Converter/include/ConcurrentWriter.h
 	./Converter/include/converter_utils.h
@@ -31,10 +31,9 @@ set(HEADER_FILES
 	./Converter/modules/LasLoader/LasLoader.h
 	./Converter/modules/unsuck/unsuck.hpp
 		./Converter/include/record_timings.hpp
-		./Converter/include/MPIcommon.h)
+		./Converter/include/MPIcommon.h Converter/src/chunker_countsort_laszip.cpp)
 
 add_executable(${target}
-	./Converter/src/chunker_countsort_laszip.cpp
 	./Converter/src/indexer.cpp 
 	./Converter/src/main.cpp
 	./Converter/src/logger.cpp

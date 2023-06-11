@@ -38,7 +38,12 @@ struct LASPointF2 {
 	uint16_t b;
 };
 
+enum class SourceFileType{
+    DATA,
+    HEADER
+};
 
+template <SourceFileType T>
 struct Source {
 	string path;
 	uint64_t filesize;
@@ -47,10 +52,12 @@ struct Source {
 	int bytesPerPoint = 0;
 	Vector3 min;
 	Vector3 max;
+    SourceFileType type = T;
 };
 
 struct State {
-	string name = "";
+
+    string name = "";
 	atomic_int64_t pointsTotal = 0;
 	atomic_int64_t pointsProcessed = 0;
 	atomic_int64_t bytesProcessed = 0;
@@ -157,9 +164,10 @@ inline void dbgPrint_ts_later(string message, bool now = false) {
 
 
 struct Options {
-	vector<string> source;
+	string dataDir;
 	string encoding = "DEFAULT"; // "BROTLI", "UNCOMPRESSED"
 	string outdir = "";
+    string headerDir = "";
 	string name = "";
 	string method = "";
 	string chunkMethod = "";

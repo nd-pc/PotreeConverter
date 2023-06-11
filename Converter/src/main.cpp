@@ -28,7 +28,8 @@ using namespace std;
 Options parseArguments(int argc, char** argv) {
 	Arguments args(argc, argv);
 
-	args.addArgument("source,i,", "Input file(s)");
+	args.addArgument("input-data,i,", "Input data directory");
+    args.addArgument("headers-dir", "LAS/LAZ headers directory");
 	args.addArgument("help,h", "Display help information");
 	args.addArgument("outdir,o", "Output directory");
 	args.addArgument("encoding", "Encoding type \"BROTLI\", \"UNCOMPRESSED\" (default)");
@@ -48,22 +49,34 @@ Options parseArguments(int argc, char** argv) {
 		exit(0);
 	}
 
-	if (!args.has("source")) {
-		cout << "PotreeConverter <source> -o <outdir>" << endl;
+	if (!args.has("input-data")) {
+		cout << "PotreeConverter -i <input-data> -o <outdir> -head-dir <header-dir>" << endl;
+		cout << endl << "For a list of options, use --help or -h" << endl;
+
+		exit(1);
+	}
+    if (!args.has("headers-dir")) {
+        cout << "PotreeConverter -i <input data directory> -o <outdir> --head-dir <header-dir>" << endl;
+        cout << endl << "For a list of options, use --help or -h" << endl;
+
+        exit(1);
+    }
+
+	string dataDir = args.get("input-data").as<string>();
+    string headerDir = args.get("headers-dir").as<string>();
+	if (!fs::is_directory(dataDir)) {
+		cout << "PotreeConverter -i <input data directory> -o <outdir> --head-dir <header-dir>" << endl;
 		cout << endl << "For a list of options, use --help or -h" << endl;
 
 		exit(1);
 	}
 
-	vector<string> source = args.get("source").as<vector<string>>();
+    if (!fs::is_directory(headerDir)) {
+        cout << "PotreeConverter -i <input data directory> -o <outdir> --head-dir <header-dir>" << endl;
+        cout << endl << "For a list of options, use --help or -h" << endl;
 
-	if (source.size() == 0) {
-		cout << "PotreeConverter <source> -o <outdir>" << endl;
-		cout << endl << "For a list of options, use --help or -h" << endl;
-
-		exit(1);
-	}
-
+        exit(1);
+    }
 	string encoding = args.get("encoding").as<string>("DEFAULT");
 	string method = args.get("method").as<string>("poisson");
 	string chunkMethod = args.get("chunkMethod").as<string>("LASZIP");
@@ -73,7 +86,7 @@ Options parseArguments(int argc, char** argv) {
 		outdir = args.get("outdir").as<string>();
 	} else {
 
-		string sourcepath = source[0];
+		string sourcepath = dataDir;
 		fs::path path(sourcepath);
 
 		//cout << fs::canonical(source[0]) << endl;
@@ -81,7 +94,7 @@ Options parseArguments(int argc, char** argv) {
 
 		if (!fs::exists(path)) {
 
-			logger::ERROR("file does not exist: " + source[0]);
+			logger::ERROR("Directory does not exist: " + dataDir);
 
 			exit(123);
 		} 
@@ -108,7 +121,8 @@ Options parseArguments(int argc, char** argv) {
 	}
 
 	outdir = fs::weakly_canonical(fs::path(outdir)).string();
-
+    headerDir = fs::weakly_canonical(fs::path(headerDir)).string();
+    dataDir = fs::weakly_canonical(fs::path(dataDir)).string();
 	//vector<string> flags = args.get("flags").as<vector<string>>();
 
 	vector<string> attributes = args.get("attributes").as<vector<string>>();
@@ -126,8 +140,9 @@ Options parseArguments(int argc, char** argv) {
 	bool noIndexing = args.has("no-indexing");
 
 	Options options;
-	options.source = source;
+	options.dataDir = dataDir;
 	options.outdir = outdir;
+    options.headerDir = headerDir;
 	options.method = method;
 	options.encoding = encoding;
 	options.chunkMethod = chunkMethod;
@@ -153,37 +168,14 @@ Options parseArguments(int argc, char** argv) {
 
 struct Curated{
 	string name;
-	vector<Source> files;
+	vector<DataFile> files;
 };
 Curated curateSources(vector<string> paths) {
 
-	string name = "";
-
-	vector<string> expanded;
-	for (auto path : paths) {
-		if (fs::is_directory(path)) {
-			for (auto& entry : fs::directory_iterator(path)) {
-				string str = entry.path().string();
-
-				if (iEndsWith(str, "las") || iEndsWith(str, "laz")) {
-					expanded.push_back(str);
-				}
-			}
-		} else if (fs::is_regular_file(path)) {
-			if (iEndsWith(path, "las") || iEndsWith(path, "laz")) {
-				expanded.push_back(path);
-			}
-		}
-
-		if (name.size() == 0) {
-			name = fs::path(path).stem().string();
-		}
-	}
-	paths = expanded;
 
 	cout << "#paths: " << paths.size() << endl;
 
-	vector<Source> sources;
+	vector<DataFile> sources;
 	sources.reserve(paths.size());
 
 	mutex mtx;
@@ -191,23 +183,23 @@ Curated curateSources(vector<string> paths) {
 	for_each(parallel, paths.begin(), paths.end(), [&mtx, &sources](string path) {
 
 		auto header = loadLasHeader(path);
-		auto filesize = fs::file_size(path);
+		//auto filesize = fs::file_size(path);
 
 		Vector3 min = { header.min.x, header.min.y, header.min.z };
 		Vector3 max = { header.max.x, header.max.y, header.max.z };
 
-		Source source;
+		DataFile source;
 		source.path = path;
 		source.min = min;
 		source.max = max;
 		source.numPoints = header.numPoints;
-		source.filesize = filesize;
+		source.filesize = header.numPoints * header.pointDataRecordLength;
 
 		lock_guard<mutex> lock(mtx);
 		sources.push_back(source);
 	});
 
-	return {name, sources};
+	return sources;
 }
 
 
@@ -218,26 +210,64 @@ struct Stats {
 	int64_t totalBytes = 0;
 	int64_t totalPoints = 0;
 };
+struct MinMax {
+    Vector3 min = { Infinity , Infinity , Infinity };
+    Vector3 max = { -Infinity , -Infinity , -Infinity };
+};
 
-Stats computeStats(vector<Source> sources){
 
-	Vector3 min = { Infinity , Infinity , Infinity };
-	Vector3 max = { -Infinity , -Infinity , -Infinity };
+MinMax computeMinMax(string headerDir, vector<Source<SourceFileType::HEADER>> &headers) {
+
+
+    vector<string> headerFiles;
+    for (auto &entry: fs::directory_iterator(headerDir)) {
+                string str = entry.path().string();
+                if (iEndsWith(str, "las") || iEndsWith(str, "laz")) {
+                    if ((iEndsWith(fs::path(str).stem().string(), "_header"))) headerFiles.push_back(str);
+                }
+    }
+    Vector3 min = { Infinity , Infinity , Infinity };
+    Vector3 max = { -Infinity , -Infinity , -Infinity };
+
+    for(auto headerFile : headerFiles){
+        auto header = loadLasHeader(headerFile);
+        min.x = std::min(min.x, header.min.x);
+        min.y = std::min(min.y, header.min.y);
+        min.z = std::min(min.z, header.min.z);
+
+        max.x = std::max(max.x, header.max.x);
+        max.y = std::max(max.y, header.max.y);
+        max.z = std::max(max.z, header.max.z);
+
+        Vector3 min = { header.min.x, header.min.y, header.min.z };
+        Vector3 max = { header.max.x, header.max.y, header.max.z };
+
+        Source<SourceFileType::HEADER> source;
+        source.path = headerFile;
+        source.min = min;
+        source.max = max;
+        source.numPoints = header.numPoints;
+        source.filesize = header.headerSize;
+
+        headers.push_back(source);
+    }
+
+    return {min, max};
+}
+
+Stats computeStats(vector<string> headers, Vector3 min, Vector3 max) {
+
+	//Vector3 min = { Infinity , Infinity , Infinity };
+	//Vector3 max = { -Infinity , -Infinity , -Infinity };
 
 	int64_t totalBytes = 0;
 	int64_t totalPoints = 0;
 
-	for(auto source : sources){
-		min.x = std::min(min.x, source.min.x);
-		min.y = std::min(min.y, source.min.y);
-		min.z = std::min(min.z, source.min.z);
-								
-		max.x = std::max(max.x, source.max.x);
-		max.y = std::max(max.y, source.max.y);
-		max.z = std::max(max.z, source.max.z);
+	for(auto source : headers){
+        auto header = loadLasHeader(source);
 
-		totalPoints += source.numPoints;
-		totalBytes += source.filesize;
+		totalPoints += header.numPoints;
+		totalBytes += header.numPoints * header.pointDataRecordLength;
 	}
 
 
@@ -349,7 +379,7 @@ Stats computeStats(vector<Source> sources){
 // }
 
 
-void chunking(Options& options, vector<Source>& sources, string targetDir, Stats& stats, State& state, Attributes outputAttributes, Monitor* monitor) {
+void chunking(Options& options, Stats& stats, State& state, Attributes outputAttributes, Monitor* monitor) {
 
 	if (options.noChunking) {
 		return;
@@ -357,7 +387,7 @@ void chunking(Options& options, vector<Source>& sources, string targetDir, Stats
     // if is always executed
 	if (options.chunkMethod == "LASZIP") {
 
-		chunker_countsort_laszip::doChunking(sources, targetDir, stats.min, stats.max, state, outputAttributes, monitor);
+		chunker_countsort_laszip::doChunking(stats.min, stats.max, state, outputAttributes, monitor);
 
 	} else if (options.chunkMethod == "LAS_CUSTOM") {
 
@@ -529,67 +559,68 @@ RECORD_TIMINGS_INIT();
 //map<string, vector<pid_t>> desc_thread_map;
 
 int n_tasks, task_id;
-int main(int argc, char** argv) {
+
+int main(int argc, char **argv) {
 
     RECORD_TIMINGS_DISABLE();
     int provided;
-    MPI_Init_thread(&argc,&argv,MPI_THREAD_SERIALIZED,&provided);
-    if(provided != MPI_THREAD_SERIALIZED){
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &provided);
+    if (provided != MPI_THREAD_SERIALIZED) {
         cout << "MPI does not support MPI_THREAD_SERIALIZED" << endl;
         exit(1);
     }
 
 
     MPI_Comm_size(MPI_COMM_WORLD, &n_tasks);
-    MPI_Comm_rank(MPI_COMM_WORLD,&task_id);
-	// { // DEBUG STUFF
+    MPI_Comm_rank(MPI_COMM_WORLD, &task_id);
+    // { // DEBUG STUFF
 
-	// 	string hierarchyDir = "D:/dev/pointclouds/Riegl/retz_converted/.hierarchyChunks";
-	// 	int hierarchyStepSize = 4;
+    // 	string hierarchyDir = "D:/dev/pointclouds/Riegl/retz_converted/.hierarchyChunks";
+    // 	int hierarchyStepSize = 4;
 
-	// 	HierarchyBuilder builder(hierarchyDir, hierarchyStepSize);
-	// 	builder.build();
+    // 	HierarchyBuilder builder(hierarchyDir, hierarchyStepSize);
+    // 	builder.build();
 
-	// 	return 0;
-	// }
+    // 	return 0;
+    // }
 
     RECORD_TIMINGS_START(recordTimings::Machine::cpu, "The total_ execution time");
 
-	double tStart = now(); 
+    double tStart = now();
 
-	auto exePath = fs::canonical(fs::absolute(argv[0])).parent_path().string();
+    auto exePath = fs::canonical(fs::absolute(argv[0])).parent_path().string();
 
-	launchMemoryChecker(2 * 1024, 0.1);
-	auto cpuData = getCpuData();
+    launchMemoryChecker(2 * 1024, 0.1);
+    auto cpuData = getCpuData();
 
-	cout << "#threads: " << cpuData.numProcessors << endl;
+    cout << "#threads: " << cpuData.numProcessors << endl;
 
-	auto options = parseArguments(argc, argv);
+    auto options = parseArguments(argc, argv);
 
+    vector<Source<SourceFileType::HEADER>> headers;
 
-    //read min-max of x,y and z for all the input LAZ files to determine overall min-max x,y, z
-	auto [name, sources] = curateSources(options.source);
-	if (options.name.size() == 0) {
-		options.name = name;
-	}
+    auto [min, max] = computeMinMax(options.headerDir, headers);
 
-	auto outputAttributes = computeOutputAttributes(sources, options.attributes);
-	cout << toString(outputAttributes);
+    auto outputAttributes = computeOutputAttributes(headers, options.attributes);
 
-	auto stats = computeStats(sources);
-	
-	string targetDir = options.outdir;
-	if (options.generatePage && task_id == MASTER) {
+    cout << toString(outputAttributes);
 
-		string pagedir = targetDir;
-		generatePage(exePath, pagedir, options.pageName);
+    auto stats = computeStats(headers, min, max);
 
-		targetDir = targetDir + "/pointclouds/" + options.pageName;
-	}
-	cout << "target directory: '" << targetDir << "'" << endl;
+    options.name = splitString("/", options.dataDir).back();
+
+    string targetDir = options.outdir;
+    if (options.generatePage && task_id == MASTER) {
+
+        string pagedir = targetDir;
+        generatePage(exePath, pagedir, options.pageName);
+
+        targetDir = targetDir + "/pointclouds/" + options.pageName;
+    }
+    cout << "target directory: '" << targetDir << "'" << endl;
 
     string logFile = targetDir + "/log.txt";
-    if(task_id == MASTER) {
+    if (task_id == MASTER) {
         fs::remove_all(targetDir);
         fs::create_directories(targetDir);
         fs::create_directories(targetDir + "/chunks");
@@ -597,42 +628,38 @@ int main(int argc, char** argv) {
         logger::addOutputFile(logFile);
     }
     MPI_Barrier(MPI_COMM_WORLD);
-	State state;
-	state.pointsTotal = stats.totalPoints;
-	state.bytesProcessed = stats.totalBytes;
+    State state;
+    state.pointsTotal = stats.totalPoints;
+    state.bytesProcessed = stats.totalBytes;
 
-	// auto monitor = startMonitoring(state);
-	auto monitor = make_shared<Monitor>(&state);
-	//monitor->start();
+    // auto monitor = startMonitoring(state);
+    auto monitor = make_shared<Monitor>(&state);
+    //monitor->start();
 
+    // this is the real important stuff
 
-	{ // this is the real important stuff
-
-        //output attributes are point attributes in LAZ including scale and offset
-        //monitor for printing output messages about CPU, RAM usage and throughput
-        //sate for keeping track of points processed
-        if (task_id == MASTER) {
-            chunking(options, sources, targetDir, stats, state, outputAttributes, monitor.get());
-        }
-
-        MPI_Barrier(MPI_COMM_WORLD);
-		indexing(options, targetDir, state);
-
-	}
-
-	//monitor->stop();
-
-    if(task_id == MASTER) {
-        createReport(options, sources, targetDir, stats, state, tStart);
+    //output attributes are point attributes in LAZ including scale and offset
+    //monitor for printing output messages about CPU, RAM usage and throughput
+    //sate for keeping track of points processed
+    if (task_id == MASTER) {
+        chunking(options, stats, state, outputAttributes, monitor.get());
     }
 
+    MPI_Barrier(MPI_COMM_WORLD);
+    indexing(options, targetDir, state);
 
-    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "The total_ execution time");
+
+if (task_id == MASTER) {
+    createReport(options, sources, targetDir, stats, state, tStart);
+}
 
 
-    RECORD_TIMINGS_PRINT(cout);
+RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "The total_ execution time");
 
-    MPI_Finalize();
 
-	return 0;
+RECORD_TIMINGS_PRINT(cout);
+
+MPI_Finalize();
+
+return 0;
 }

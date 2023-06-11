@@ -30,6 +30,10 @@ struct LasHeader {
 
 	int pointDataFormat = -1;
 
+    int pointDataRecordLength = 0;
+
+    int headerSize = 0;
+
 	vector<VLR> vlrs;
 };
 

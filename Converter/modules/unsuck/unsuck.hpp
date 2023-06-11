@@ -198,12 +198,15 @@ inline double now() {
 }
 
 
-inline void printElapsedTime(string label, double startTime) {
+double printElapsedTime(string label, double startTime) {
 
 	double elapsed = now() - startTime;
 
-	string msg = label + ": " + to_string(elapsed) + "s\n";
-	cout << msg;
+    if (label != "") {
+        string msg = label + ": " + to_string(elapsed) + "s\n";
+        cout << msg;
+    }
+    return elapsed;
 }
 
 
@@ -281,7 +284,23 @@ inline std::vector<int64_t> random(int64_t min, int64_t max, int64_t n) {
 	return values;
 }
 
+//From chatGPT: Write a C++ function that takes in a delimiter and astring as input parameters and returns a vector of string splitted at the delimitter?
+std::vector<std::string> splitString(const std::string& delimiter, const std::string& inputString) {
+    std::vector<std::string> result;
+    std::string::size_type startPos = 0;
+    std::string::size_type endPos = inputString.find(delimiter);
 
+    while (endPos != std::string::npos) {
+        result.push_back(inputString.substr(startPos, endPos - startPos));
+        startPos = endPos + delimiter.length();
+        endPos = inputString.find(delimiter, startPos);
+    }
+
+    // Add the remaining substring (or the whole string if no delimiter was found)
+    result.push_back(inputString.substr(startPos, endPos));
+
+    return result;
+}
 
 inline string stringReplace(string str, string search, string replacement) {
 
@@ -333,6 +352,8 @@ inline bool iEndsWith(const std::string& str, const std::string& suffix) {
 
 	return icompare(tstr, suffix);
 }
+
+
 
 // taken from: https://stackoverflow.com/questions/2602013/read-whole-ascii-file-into-c-stdstring/2602060
 inline string readTextFile(string path) {

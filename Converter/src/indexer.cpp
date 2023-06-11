@@ -486,6 +486,7 @@ namespace indexer{
 
     }
 
+
 	void Indexer::flushChunkRoot(shared_ptr<Node> chunkRoot) {
 
         //lock_guard<mutex> lock(mtx_chunkRoot);

@@ -192,7 +192,7 @@ inline vector<Attribute> computeOutputAttributes(LasHeader& header) {
 	return list;
 }
 
-inline Attributes computeOutputAttributes(vector<Source>& sources, vector<string> requestedAttributes) {
+inline Attributes computeOutputAttributes(vector<Source<SourceFileType::HEADER>> &headers, vector<string> requestedAttributes) {
 	// TODO: a bit wasteful to iterate over source files and load headers twice
 
 	Vector3 scaleMin = { Infinity, Infinity, Infinity };
@@ -208,9 +208,9 @@ inline Attributes computeOutputAttributes(vector<Source>& sources, vector<string
 	{
 		mutex mtx;
 		auto parallel = std::execution::par;
-		for_each(parallel, sources.begin(), sources.end(), [&mtx, &sources, &scaleMin, &min, &max, requestedAttributes, &fullAttributeList, &acceptedAttributeNames](Source source) {
+		for_each(parallel, headers.begin(), headers.end(), [&mtx, &headers, &scaleMin, &min, &max, requestedAttributes, &fullAttributeList, &acceptedAttributeNames](Sourc head) {
 
-			auto header = loadLasHeader(source.path);
+			auto header = loadLasHeader(head);
 
 			vector<Attribute> attributes = computeOutputAttributes(header);
 

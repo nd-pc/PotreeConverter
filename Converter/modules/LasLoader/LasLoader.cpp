@@ -104,6 +104,11 @@ LasHeader loadLasHeader(string path) {
 
 	result.pointDataFormat = header->point_data_format;
 
+    result.pointDataRecordLength = header->point_data_record_length;
+
+    result.headerSize = header->header_size;
+
+
 	int numVlrs = header->number_of_variable_length_records;
 	for (int i = 0; i < numVlrs; i++) {
 		auto laszip_vlr = header->vlrs[i];
