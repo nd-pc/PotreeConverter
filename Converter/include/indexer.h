@@ -385,6 +385,8 @@ namespace indexer{
         //vector<MPI_Status> fcrRcvStatus;
         //vector<int> fcrRcvFlag;
 
+
+
         //int fcrRcvBufferSize = 1e6;
 
 		Indexer(string targetDir) {
@@ -392,7 +394,7 @@ namespace indexer{
 			this->targetDir = targetDir;
 
 			writer = make_shared<Writer>(this);
-			hierarchyFlusher = make_shared<HierarchyFlusher>(targetDir + "/.hierarchyChunks");
+			hierarchyFlusher = make_shared<HierarchyFlusher>(targetDir + "/.hierarchyChunks_" + to_string(task_id));
 
             //Assuming all other datatypes are smaller than int64 and double.
             maxVarSize = std::max(sizeof(int64_t), sizeof(double));
