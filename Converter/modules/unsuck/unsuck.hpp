@@ -89,8 +89,7 @@ inline string formatNumber(T number, int decimals = 0) {
 	return ss.str();
 }
 
-struct
-Buffer {
+struct Buffer {
 
 	void* data = nullptr;
 	uint8_t* data_u8 = nullptr;
