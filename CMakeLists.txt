@@ -31,9 +31,10 @@ set(HEADER_FILES
 	./Converter/modules/LasLoader/LasLoader.h
 	./Converter/modules/unsuck/unsuck.hpp
 		./Converter/include/record_timings.hpp
-		./Converter/include/MPIcommon.h Converter/src/chunker_countsort_laszip.cpp)
+		./Converter/include/MPIcommon.h)
 
 add_executable(${target}
+		./Converter/src/chunker_countsort_laszip.cpp
 	./Converter/src/indexer.cpp 
 	./Converter/src/main.cpp
 	./Converter/src/logger.cpp

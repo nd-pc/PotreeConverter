@@ -285,6 +285,8 @@ struct HierarchyBuilder{
 		return buffer;
 	}
 
+
+
 	void build(){
 
 		string hierarchyFilePath = path + "/../hierarchy.bin";
@@ -357,7 +359,6 @@ struct HierarchyBuilder{
 			f.write(buffer->data_char, buffer->size);
 			f.close();
 		}
-
 		// redundant security check
         for(int i = 0; i < n_tasks; i++) {
             if (iEndsWith(this->path, ".hierarchyChunks_" + to_string(i))) {

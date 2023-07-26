@@ -86,7 +86,7 @@ struct Vector3{
 		return Vector3(x * scalar, y * scalar, z * scalar);
 	}
 
-	string toString() {
+	string toString() const {
 
 		auto digits = std::numeric_limits<double>::max_digits10;
 

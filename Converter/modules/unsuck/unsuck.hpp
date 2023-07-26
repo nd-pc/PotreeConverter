@@ -38,7 +38,6 @@ static long long unsuck_start_time = high_resolution_clock::now().time_since_epo
 
 static double Infinity = std::numeric_limits<double>::infinity();
 
-
 #if defined(__linux__)
 constexpr auto fseek_64_all_platforms = fseeko64;
 #elif defined(WIN32)
@@ -197,7 +196,7 @@ inline double now() {
 }
 
 
-double printElapsedTime(string label, double startTime) {
+inline double printElapsedTime(string label, double startTime) {
 
 	double elapsed = now() - startTime;
 
@@ -284,7 +283,7 @@ inline std::vector<int64_t> random(int64_t min, int64_t max, int64_t n) {
 }
 
 //From chatGPT: Write a C++ function that takes in a delimiter and astring as input parameters and returns a vector of string splitted at the delimitter?
-std::vector<std::string> splitString(const std::string& delimiter, const std::string& inputString) {
+inline std::vector<std::string> splitString(const std::string& delimiter, const std::string& inputString) {
     std::vector<std::string> result;
     std::string::size_type startPos = 0;
     std::string::size_type endPos = inputString.find(delimiter);
@@ -399,6 +398,8 @@ inline shared_ptr<Buffer> readBinaryFile(vector<string> &paths) {
         offset += fs::file_size(path);
         fclose(file);
     }
+
+
 
 	return buffer;
 }
@@ -580,7 +581,6 @@ inline void logDebug(string message) {
 }
 
 
-
 template<typename T>
 T read(vector<uint8_t>& buffer, int offset) {
 	//T value = reinterpret_cast<T*>(buffer.data() + offset)[0];
@@ -590,6 +590,7 @@ T read(vector<uint8_t>& buffer, int offset) {
 
 	return value;
 }
+
 
 
 

@@ -20,6 +20,7 @@ struct VLR {
 	vector<uint8_t> data;
 };
 
+
 struct LasHeader {
 	Vector3 min;
 	Vector3 max;

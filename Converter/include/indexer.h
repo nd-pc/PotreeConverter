@@ -29,6 +29,7 @@
 
 using json = nlohmann::json;
 
+
 using std::atomic_int64_t;
 using std::atomic_int64_t;
 using std::deque;
@@ -111,6 +112,8 @@ namespace indexer{
 		mutex mtx;
 
 		Writer(Indexer* indexer);
+
+        void launch();
 
 		void writeAndUnload(Node* node);
 
@@ -349,7 +352,7 @@ namespace indexer{
 
 		atomic_int64_t byteOffset = 0;
 
-        int64_t octreeFileOffset = 0;
+        int64_t octreeFileSize = 0;
 
 
 
@@ -380,10 +383,15 @@ namespace indexer{
 
         uint8_t *fcrMPIsend = nullptr;
         MPI_Request fcrSendRequest;
+        int64_t processOctreeFileOffset = 0;
+
+        int64_t currentTotalOctreeFileSize = 0;
 
         //vector<MPI_Request> fcrRcvRequest;
         //vector<MPI_Status> fcrRcvStatus;
         //vector<int> fcrRcvFlag;
+
+
 
 
 
@@ -455,7 +463,9 @@ namespace indexer{
 		string do_grouping() const { return "\3"; }
 	};
 
-	void doIndexing(string targetDir, State& state, Options& options, Sampler& sampler);
+	shared_ptr<Chunks> doIndexing(string targetDir, State& state, Options& options, Sampler& sampler, Indexer &indexer, bool islastbatch);
+    void doFinalMerge(Indexer &indexer, shared_ptr<Chunks> chunks, string targetDir, Sampler &sampler, Options &options,
+                      State &state);
 
 
 }

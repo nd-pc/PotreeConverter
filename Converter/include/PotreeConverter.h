@@ -6,6 +6,8 @@
 #include "Vector3.h"
 #include "LasLoader/LasLoader.h"
 
+
+
 struct Dbg {
 
 	bool isDebug = false;
@@ -77,14 +79,14 @@ inline ScaleOffset computeScaleOffset(Vector3 min, Vector3 max, Vector3 targetSc
 
 
 
-inline vector<Attribute> parseExtraAttributes(LasHeader& header) {
+inline vector<Attribute> parseExtraAttributes(Source& header) {
 
 	// vector<uint8_t> extraData;
 	vector<Attribute> attributes;
 
-	for (auto& vlr : header.vlrs) {
-		if (vlr.recordID == 4) {
-			auto extraData = vlr.data;
+	for (auto& v : header.vlrs) {
+		if (v.recordID == 4) {
+			auto extraData = v.data;
 
 			constexpr int recordSize = 192;
 			int numExtraAttributes = extraData.size() / recordSize;
@@ -133,7 +135,7 @@ inline vector<Attribute> parseExtraAttributes(LasHeader& header) {
 }
 
 
-inline vector<Attribute> computeOutputAttributes(LasHeader& header) {
+inline vector<Attribute> computeOutputAttributes(Source& header) {
 	auto format = header.pointDataFormat;
 
 	Attribute xyz("position", 12, 3, 4, AttributeType::INT32);
@@ -192,7 +194,7 @@ inline vector<Attribute> computeOutputAttributes(LasHeader& header) {
 	return list;
 }
 
-inline Attributes computeOutputAttributes(vector<Source<SourceFileType::HEADER>> &headers, vector<string> requestedAttributes) {
+inline Attributes computeOutputAttributes(vector<Source> &sources, vector<string> requestedAttributes) {
 	// TODO: a bit wasteful to iterate over source files and load headers twice
 
 	Vector3 scaleMin = { Infinity, Infinity, Infinity };
@@ -208,11 +210,10 @@ inline Attributes computeOutputAttributes(vector<Source<SourceFileType::HEADER>>
 	{
 		mutex mtx;
 		auto parallel = std::execution::par;
-		for_each(parallel, headers.begin(), headers.end(), [&mtx, &headers, &scaleMin, &min, &max, requestedAttributes, &fullAttributeList, &acceptedAttributeNames](Sourc head) {
+		for_each(parallel, sources.begin(), sources.end(), [&mtx, &sources, &scaleMin, &min, &max, requestedAttributes, &fullAttributeList, &acceptedAttributeNames](Source source) {
 
-			auto header = loadLasHeader(head);
 
-			vector<Attribute> attributes = computeOutputAttributes(header);
+			vector<Attribute> attributes = computeOutputAttributes(source);
 
 			mtx.lock();
 
@@ -225,17 +226,17 @@ inline Attributes computeOutputAttributes(vector<Source<SourceFileType::HEADER>>
 				}
 			}
 
-			scaleMin.x = std::min(scaleMin.x, header.scale.x);
-			scaleMin.y = std::min(scaleMin.y, header.scale.y);
-			scaleMin.z = std::min(scaleMin.z, header.scale.z);
+			scaleMin.x = std::min(scaleMin.x, source.scale.x);
+			scaleMin.y = std::min(scaleMin.y, source.scale.y);
+			scaleMin.z = std::min(scaleMin.z, source.scale.z);
 
-			min.x = std::min(min.x, header.min.x);
-			min.y = std::min(min.y, header.min.y);
-			min.z = std::min(min.z, header.min.z);
+			min.x = std::min(min.x, source.min.x);
+			min.y = std::min(min.y, source.min.y);
+			min.z = std::min(min.z, source.min.z);
 
-			max.x = std::max(max.x, header.max.x);
-			max.y = std::max(max.y, header.max.y);
-			max.z = std::max(max.z, header.max.z);
+			max.x = std::max(max.x, source.max.x);
+			max.y = std::max(max.y, source.max.y);
+			max.z = std::max(max.z, source.max.z);
 
 			mtx.unlock();
 			});

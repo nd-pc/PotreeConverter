@@ -9,16 +9,12 @@
 
 #include "chunker_countsort_laszip.h"
 
-#include "Attributes.h"
-#include "converter_utils.h"
-#include "unsuck/unsuck.hpp"
+
 #include "unsuck/TaskPool.hpp"
-#include "Vector3.h"
 #include "ConcurrentWriter.h"
 
 #include "json/json.hpp"
 #include "laszip/laszip_api.h"
-#include "LasLoader/LasLoader.h"
 #include "PotreeConverter.h"
 #include "logger.h"
 #include "record_timings.hpp"
@@ -123,37 +119,7 @@ namespace chunker_countsort_laszip {
 		return double(value);
 	}
 
-    vector<DataFile> curateSources(vector<string> paths) {
 
-
-        cout << "#paths: " << paths.size() << endl;
-
-        vector<DataFile> sources;
-        sources.reserve(paths.size());
-
-        mutex mtx;
-        auto parallel = std::execution::par;
-        for_each(parallel, paths.begin(), paths.end(), [&mtx, &sources](string path) {
-
-            auto header = loadLasHeader(path);
-            //auto filesize = fs::file_size(path);
-
-            Vector3 min = { header.min.x, header.min.y, header.min.z };
-            Vector3 max = { header.max.x, header.max.y, header.max.z };
-
-            DataFile source;
-            source.path = path;
-            source.min = min;
-            source.max = max;
-            source.numPoints = header.numPoints;
-            source.filesize = header.numPoints * header.pointDataRecordLength;
-
-            lock_guard<mutex> lock(mtx);
-            sources.push_back(source);
-        });
-
-        return sources;
-    }
     vector<function<void(int64_t)>> createAttributeHandlers(laszip_header* header, uint8_t* data, laszip_point* point, Attributes& inputAttributes, Attributes& outputAttributes, State &state) {
 
         vector<function<void(int64_t)>> handlers;
@@ -464,7 +430,7 @@ namespace chunker_countsort_laszip {
 
     }
 
-	void countPointsInCells(vector<DataFile> sources, Vector3 min, Vector3 max, vector<std::atomic_int32_t>& grid, int64_t gridSize, State& state, Attributes& outputAttributes, Monitor* monitor) {
+	void countPointsInCells(vector<Source> sources, Vector3 min, Vector3 max, vector<std::atomic_int32_t>& grid, int64_t gridSize, State& state, Attributes& outputAttributes, Monitor* monitor) {
 
 		cout << endl;
 		cout << "=======================================" << endl;
@@ -699,7 +665,7 @@ namespace chunker_countsort_laszip {
 			int64_t batchSize = 1'000'000;
 			int64_t numRead = 0;
 
-            vector<DataFile> tmpSources = { source };
+            vector<Source> tmpSources = { source };
             Attributes inputAttributes = computeOutputAttributes(tmpSources, {});
 
 			while (pointsLeft > 0) {
@@ -1092,7 +1058,7 @@ namespace chunker_countsort_laszip {
 			int64_t maxBatchSize = 1'000'000;
 			int64_t numRead = 0;
 
-			vector<DataFile> tmpSources = { source };
+			vector<Source> tmpSources = { source };
 			Attributes inputAttributes = computeOutputAttributes(tmpSources, {});
 
 			while (pointsLeft > 0) {
@@ -1342,7 +1308,6 @@ namespace chunker_countsort_laszip {
 				lut[index] = i;
 			});
 		}
-
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "create LUT time");
 
 		//printElapsedTime("createLUT", tStart);
@@ -1350,40 +1315,48 @@ namespace chunker_countsort_laszip {
 		return {gridSize, lut};
 	}
 
-	void doChunking(Vector3 min, Vector3 max, State& state, Attributes outputAttributes, Monitor* monitor) {
+	NodeLUT doCounting(Vector3 min, Vector3 max, State& state, string targetDir, Attributes outputAttributes, Monitor* monitor) {
 
-		auto tStart = now();
 
         //pointsTotal = sum of all num_points
-		int64_t tmp = state.pointsTotal / 20;
-		maxPointsPerChunk = std::min(tmp, int64_t(10'000'000));
-		// cout << "maxPointsPerChunk: " << maxPointsPerChunk << endl;
+        int64_t tmp = state.pointsTotal / 20;
+        maxPointsPerChunk = std::min(tmp, int64_t(10'000'000));
+        // cout << "maxPointsPerChunk: " << maxPointsPerChunk << endl;
 
         // the actual grid is gridSize x gridSize x gridSize
-		if (state.pointsTotal < 100'000'000) {
-			gridSize = 128;
-		}else if(state.pointsTotal < 500'000'000){
-			gridSize = 256;
-		} else {
-			gridSize = 512;
-		}
+        if (state.pointsTotal < 100'000'000) {
+            gridSize = 128;
+        } else if (state.pointsTotal < 500'000'000) {
+            gridSize = 256;
+        } else {
+            gridSize = 512;
+        }
+
 
         vector<std::atomic_int32_t> grid(gridSize * gridSize * gridSize);
-		state.currentPass = 1;
+        state.currentPass = 1;
 
         int batchNum = 1;
-        double countingTime = 0.0;
-        double actualCountingTime = 0.0;
-        double tStartTotalCounting = now();
-        while (!fstream("../.nomorefilesleftforcounting.txt").good()) {
+        bool isLastBatch = false;
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
+        while (!fs::exists(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"))) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting");
+        while (!isLastBatch) {
             // cout << "waiting for file" << endl;
-            while (!fstream("../.batchno" + to_string(batchNum) + "copied.txt").good()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            }
+
             fstream batchfiles;
-            batchfiles.open("../.batchno" + to_string(batchNum) + "copied.txt", ios::in);
+            batchfiles.open(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
             string lazFiles;
             getline(batchfiles, lazFiles);
+            string lastBatch;
+            getline(batchfiles, lastBatch);
+            if (lastBatch == "lastbatch") {
+                isLastBatch = true;
+            }
+
 
             vector<string> lazFilesVec = splitString(" ", lazFiles);
 
@@ -1391,8 +1364,7 @@ namespace chunker_countsort_laszip {
 
             batchfiles.close();
 
-            fs::remove(fs::path("../.batchno" + to_string(batchNum) + "copied.txt"));
-
+            fs::remove(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"));
 
 
 
@@ -1400,59 +1372,51 @@ namespace chunker_countsort_laszip {
             // COUNT: this function determines the cell to which a point belongs in a grid of gridSize x gridSize x gridSize and increments it.
             // For large data s AHN3 the grid is 512 x 512 x 512
 
+
+
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "counting time");
+            auto tStart = now();
+            countPointsInCells(sources, min, max, grid, gridSize,
+                               state,
+                               outputAttributes, monitor);
+            auto duration = now() - tStart;
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "counting time");
             fstream signalToCopier;
-            signalToCopier.open("../.countingstartedforbatchno" + to_string(batchNum) + ".txt", ios::out);
-            signalToCopier << to_string(countingTime) << endl;
+            signalToCopier.open(targetDir + "/.counting_done_signals/batchno_" + to_string(batchNum) + "_counted", ios::out);
+            signalToCopier << to_string(duration);
             signalToCopier.close();
             batchNum++;
-            auto tStartCount = now();
-            countPointsInCells(sources, min, max, grid, gridSize,
-                                                         state,
-                                                         outputAttributes, monitor);
-            countingTime = printElapsedTime("countPointsInCells", tStartCount);
-            actualCountingTime += countingTime;
-
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting")
+            while (!fs::exists(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"))) {
+                if (isLastBatch)
+                    break;
+                else
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            }
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting")
 
         }
-        printElapsedTime("Total counting time including wait time in cp/remove of source files", tStartTotalCounting);
-        cout << "Actual counting time excluding wait time in cp/remove of source files" << actualCountingTime << endl;
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu,  "Total time spent in counting including waiting for copying");
+        string metadataPath = targetDir + "/chunks/metadata.json";
+        double cubeSize = (max - min).max();
+        Vector3 size = { cubeSize, cubeSize, cubeSize };
+        max = min + cubeSize;
 
-        fs::remove(fs::path("../.nomorefilesleftforcounting.txt"));
-        auto tStartMerge = now();
+        writeMetadata(metadataPath, min, max, outputAttributes);
+
+        // MERGE: this function merges cells in a grid of gridSize x gridSize x gridSize
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "merge time");
         auto lut = createLUT(grid, gridSize);
-        printElapsedTime("createLUT", tStartMerge);
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "merge time");
+        return lut;
+    }
 
 
-		{ // DISTIRBUTE
-			auto tStartDistribute = now();
-
-
-            // MERGE: this function merges cells in a grid of gridSize x gridSize x gridSize
-            auto tStartMerge = now();
-			auto lut = createLUT(grid, gridSize);
-            printElapsedTime("createLUT", tStartMerge);
-
-
+     void doDistribution(Vector3 min, Vector3 max, State& state, NodeLUT lut, string targetDir, vector<Source> sources, Attributes outputAttributes, Monitor* monitor) {
 			state.currentPass = 2;
-            auto tStartDistributePoints = now();
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "distribution time");
 			distributePoints(sources, min, max, targetDir, lut, state, outputAttributes, monitor);
-            printElapsedTime("distributePoints", tStartDistributePoints);
-			{
-				double duration = now() - tStartDistribute;
-				state.values["duration(chunking-distribute)"] = formatNumber(duration, 3);
-			}
-		}
-		
-
-		string metadataPath = targetDir + "/chunks/metadata.json";
-		double cubeSize = (max - min).max();
-		Vector3 size = { cubeSize, cubeSize, cubeSize };
-		max = min + cubeSize;
-
-		writeMetadata(metadataPath, min, max, outputAttributes);
-
-		double duration = now() - tStart;
-		state.values["duration(chunking-total)"] = formatNumber(duration, 3);
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "distribution time");
 
 	}
 

@@ -11,18 +11,22 @@
 using std::string;
 using std::vector;
 
-class DataFile;
+class Source;
 class State;
 
-namespace chunker_countsort_laszip {
 
-	void doChunking(Vector3 min, Vector3 max, State& state, Attributes outputAttributes, Monitor* monitor);
+namespace chunker_countsort_laszip {
 
     // grid contains index of node in nodes
     struct NodeLUT {
         int64_t gridSize;
         vector<int> grid;
     };
+
+	NodeLUT doCounting(Vector3 min, Vector3 max, State& state, string targetDir, Attributes outputAttributes, Monitor* monitor);
+    void doDistribution(Vector3 min, Vector3 max, State& state, NodeLUT lut, string targetDir, vector<Source> sources, Attributes outputAttributes, Monitor* monitor);
+
+
 
 
 

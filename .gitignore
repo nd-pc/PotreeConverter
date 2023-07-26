@@ -89,4 +89,5 @@ fabric.properties
 outputs/
 rsync_PotreeConverterMPI.sh
 watchers.xml
-
+*.csv
+partition_strategy
