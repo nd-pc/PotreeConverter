@@ -796,7 +796,6 @@ namespace chunker_countsort_laszip {
 
 		auto processor = [&mtx_push_point, &counters, targetDir, &state, tStart, &outputAttributes](shared_ptr<Task> task) {
 
-            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "distribute time");
 			auto path = task->path;
 			auto batchSize = task->batchSize;
 			auto* lut = task->lut;
@@ -1034,7 +1033,6 @@ namespace chunker_countsort_laszip {
 //				}
 //			}
 
-            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "distribute time");
 		};
 
 		TaskPool<Task> pool(numChunkerThreads, processor);
