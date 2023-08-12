@@ -9,8 +9,23 @@ import csv
 import psutil
 import shutil
 
-
 from multiprocessing import Process, Queue
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+
+    def disable(self):
+        self.HEADER = ''
+        self.OKBLUE = ''
+        self.OKGREEN = ''
+        self.WARNING = ''
+        self.FAIL = ''
+        self.ENDC = ''
 
 scratchSpaceAvailable = 17*(1024)**3 #
 
@@ -21,15 +36,16 @@ spaceUtilizationFactorIndexing = 5
 
 storageInputDir = "/home/anauman/staff-umbrella/ahn3_sim_data"
 
-scratchInputDir = "/scratch/anauman/escience/projects/nD-PC/ahn3_sim_data"
+headersDir = "/scratch/anauman/escience/projects/nD-PC/ahn3_sim_data_headers"
 
-scratchOutDir = scratchInputDir + "_PotreeConverterMPI_output"
+scratchInputDir = "/scratch/anauman/escience/projects/nD-PC/" + Path(storageInputDir).name
 
-storageOutDir = storageInputDir + "_PotreeConverterMPI_output"
+scratchOutDir = scratchInputDir + "_PotreeConverterMPI_output_FP_error"
+
+storageOutDir = storageInputDir + "_PotreeConverterMPI_output_FP_error"
 
 AHN3partitions = "ahn3_partitions_4x4.csv"
 
-sbatchScript = "/home/anauman/escience/projects/nD-PC/PotreeConverter/delftblue_cluster.sh"
 
 logFile = "log.txt"
 
@@ -54,14 +70,17 @@ class BatchCopier:
 
     def removeBatch(self, batchNum):
         if batchNum in self.batchDict:
-            self.removeFiles(self.batchDict[batchNum]["copiedfiles"])
+            self.removeFiles(self.batchDict[batchNum]["files"])
         else:
             print("Error: batch number " + str(batchNum) + " does not exist")
             exit(1)
         size = self.batchDict[batchNum]["size"]
         self.totalSize -= self.storageUtilizationFactor * size #update the total size
+        print("Removed batch-" + str(batchNum) + "/partition-" + self.batchDict[batchNum]["partition"] + " from " + self.batchDict[batchNum]["destdir"])
         del self.batchDict[batchNum]    #remove the batch from the dictionary
+
         return size
+
 
     def filesSubsets(self, filesToSubset):
         filesList = filesToSubset.split()
@@ -98,9 +117,9 @@ class BatchCopier:
             if rmCmdStatus.returncode != 0:
                 print("Error removing file: " + rmCmdStatus.stderr)
                 exit(1)
+        #print("Removed files: " + filesToRemove)
 
-
-    def copyFiles(self, filesToCopy, size,  destination):
+    def copyFiles(self, filesToCopy, size,  destination, partition = ""):
         subsets = self.filesSubsets(filesToCopy)
         startCopyTime = time.time()
         for subset in subsets:
@@ -110,14 +129,16 @@ class BatchCopier:
                 print("Error copying files: " + copyCmdStatus.stderr)
                 exit(1)
         copyTime = time.time() - startCopyTime
-        self.batchCopied += 1
-        self.batchDict[self.batchCopied] = {"copiedfiles": " ".join(map(lambda x: str(destination + "/" + Path(x).name), filesToCopy.split())), "size": size, "starttime":time.time()}
+        if partition == "":
+            partition = str(self.batchCopied)
+        self.batchDict[self.batchCopied] = {"files": " ".join(map(lambda x: str(destination + "/" + Path(x).name), filesToCopy.split())), "size": size, "starttime":time.time(), "destdir": destination, "partition": partition}
         self.totalSize += self.storageUtilizationFactor * size
         self.totalCopyRemoveTime += copyTime
-        print("\tBatch " + str(self.batchCopied) +  " copied")#: " + ",".join(map(lambda x: Path(x).name, filesToCopy.split())))
+        print("\tCopied batch-" + str(self.batchCopied) + "/partition-" + partition +  " to " + destination)#: " + ",".join(map(lambda x: Path(x).name, filesToCopy.split())))
         print("\tSize: " + str(size) + " bytes")
         print("\tTime: " + str(copyTime))
         print("\tCopying throughput: " + str((size / copyTime) / (1024**2)) + " MB/s")
+        self.batchCopied += 1
     def getNumBatchesCopied(self):
         return self.batchCopied
 
@@ -144,6 +165,10 @@ class BatchCopier:
         return self.totalTimeWaiting
     def getTotalCopyTime(self):
         return self.totalCopyTime
+    def getPartitionNum(self, batchNum):
+        return self.batchDict[batchNum]["partition"]
+    def getFiles(self, batchNum):
+        return self.batchDict[batchNum]["files"]
     def concatFiles(self, filesToConcat, destination):
         concatCmd = shutil.which("cat") + " " + filesToConcat +  " >> " + destination
         startConcatTime = time.time()
@@ -152,41 +177,45 @@ class BatchCopier:
         if concatCmdStatus.returncode != 0:
             print("\tError concatenating files: " + concatCmdStatus.stderr)
             exit(1)
-        print("\tFiles concatenated: " + filesToConcat)
+        print("\tFiles concatenated: " + filesToConcat + " to " + destination)
         print("\tTime: " + str(concatTime))
 
 
 def counting():
 
     lazFilesforCount = glob.glob(storageInputDir + "/*.[lL][aA][zZ]")
+    countDone = []
+    numFilesdone = 0
+    numBatches = 0
     #spaceleft = scratchSpaceAvailable
     batchCopier = BatchCopier(spaceUtilizationFactorCounting)
     while lazFilesforCount: #loop until all files are copied
         if batchCopier.gettotalSize() < scratchSpaceAvailable:
             size = 0
             filesToCopy = ""
-            for laz in lazFilesforCount:
+            currlazFilesforCount = lazFilesforCount.copy()
+            for laz in currlazFilesforCount:
                 p = Path(laz)
                 size += p.stat().st_size
-                if size <= sizePerIterforCounting:
+                if size <= sizePerIterforCounting and  batchCopier.gettotalSize() + (spaceUtilizationFactorCounting * size) <= scratchSpaceAvailable:
                     filesToCopy += " " + laz
                     lazFilesforCount.remove(laz)
                 else:
                     break
             batchCopier.copyFiles(filesToCopy, size, scratchInputDir)
+            if batchCopier.gettotalSize() > scratchSpaceAvailable:
+                print(bcolors.WARNING, "\tWARNING: Space utilization exceeded in counting after copying batch " + str(batchCopier.getNumBatchesCopied() - 1)  + ". Total space utilization:" + str(batchCopier.gettotalSize()) + " bytes, Max allowed:" + str(scratchSpaceAvailable) + " bytes", bcolors.ENDC)
             #spaceleft -= size
             #spaceleft = max(0, spaceleft)
-            batchCopier.setTotalSize(max(batchCopier.gettotalSize(),0))
-            with open(scratchOutDir + "/.counting_copy_done_signals/batchno_" + str(batchCopier.getNumBatchesCopied()) +"_copied", "w") as signalToPotreeConverterMPI: #signal to potree converter
+
+            #batchCopier.setTotalSize(max(batchCopier.gettotalSize(),0))
+            with open(scratchOutDir + "/.counting_copy_done_signals/batchno_" + str(batchCopier.getNumBatchesCopied() - 1) +"_copied", "w") as signalToPotreeConverterMPI: #signal to potree converter
                 signalToPotreeConverterMPI.write(" ".join(map(lambda x: str(scratchInputDir + "/" + Path(x).name), filesToCopy.split()))) #write the copied files to the signal file
                 if (lazFilesforCount == []):
                     signalToPotreeConverterMPI.write("\nlastbatch")
                 else:
                     signalToPotreeConverterMPI.write("\nnotlastbatch")
-        else:
-            if not batchCopier.isbatchDictEmpty():
-                print("\tWaiting for counting to finish for batches " + ",".join(map(str, batchCopier.getCopiedBatchesKeys())))
-            time.sleep(60)
+
         for signal in glob.glob(scratchOutDir + "/.counting_done_signals/batchno*"):
             PotreeConverterMPIsignalFile = Path(signal)
             batchNum =int(PotreeConverterMPIsignalFile.stem.split("_")[1])
@@ -196,12 +225,19 @@ def counting():
             batchCopier.addExecutionTime(duration)
             batchCopier.addWaitingTime(tend - duration)
 
-            print("\tBatch " +str(batchNum) + " done counting in " +str(duration) + " seconds")
+            print("\tBatch-" +str(batchNum) + "/Partition-" + str(batchCopier.getPartitionNum(batchNum)) + " done counting in " +str(duration) + " seconds")
+            countDone.append(str(batchNum) + "/" + str(batchCopier.getPartitionNum(batchNum)))
+            numFilesdone += len(batchCopier.getFiles(batchNum).split())
+            numBatches += 1
             #spaceleft += size
             batchCopier.removeBatch(batchNum)
+            batchCopier.setTotalSize(max(0, batchCopier.gettotalSize()))
             PotreeConverterMPIsignalFile.unlink() #remove the signal file
-            batchCopier.setTotalSize(min(scratchSpaceAvailable, batchCopier.gettotalSize()))
 
+
+        if not batchCopier.isbatchDictEmpty():
+            print("\tCounting pending for batches/partitions: " + ",".join(map(lambda x: str(x) + "/" + str(batchCopier.getPartitionNum(x)), batchCopier.getCopiedBatchesKeys())) + ". Done batch/partition no.s: " + ",".join(countDone))
+            time.sleep(60)
     while not batchCopier.isbatchDictEmpty():
         for signal in glob.glob(scratchOutDir + "/.counting_done_signals/batchno*"):
             PotreeConverterMPIsignalFile = Path(signal)
@@ -211,42 +247,52 @@ def counting():
                 duration = float(signalFile.read())
             batchCopier.addExecutionTime(duration)
             batchCopier.addWaitingTime(tend - duration)
-            print("\tBatch " + str(batchNum) + " done counting in " + str(duration) + " seconds")
+            print("\tBatch-" +str(batchNum) + "/Partition-" + str(batchCopier.getPartitionNum(batchNum)) + " done counting in " +str(duration) + " seconds")
+            countDone.append(str(batchNum) + "/" + str(batchCopier.getPartitionNum(batchNum)))
+            numFilesdone += len(batchCopier.getFiles(batchNum).split())
+            numBatches += 1
             #spaceleft += size
             batchCopier.removeBatch(batchNum)
+            batchCopier.setTotalSize(max(0, batchCopier.gettotalSize()))
             PotreeConverterMPIsignalFile.unlink()
-        batchCopier.setTotalSize(min(scratchSpaceAvailable, batchCopier.gettotalSize()))
-        if not batchCopier.isbatchDictEmpty():
-            print("\tWaiting for counting to finish for batches " + ",".join(map(str, batchCopier.getCopiedBatchesKeys())))
-        time.sleep(60)
-    #open(scratchOutDir + "/.counting_copy_done_signals/nomorefilesleftforcounting", "w").close()
 
+        if not batchCopier.isbatchDictEmpty():
+            print("\tCounting pending for batches/partitions: " + ",".join(map(lambda x: str(x) + "/" + str(batchCopier.getPartitionNum(x)), batchCopier.getCopiedBatchesKeys())) +". Done batch/partition no.s: " + ",".join(countDone))
+            time.sleep(60)
+    #open(scratchOutDir + "/.counting_copy_done_signals/nomorefilesleftforcounting", "w").close()
+    print("\tCounting finished. Total " + str(numFilesdone) + " files counted in " + str(numBatches) + " batches.")
 
 def indexing(batches):
     #spaceleft = scratchSpaceAvailable
     batchCopier = BatchCopier(spaceUtilizationFactorIndexing)
+    skipPartitions = []
+    indexingDone = []
+    numFilesdone = 0
+    numBatches = 0
+    totalBatches = len(batches)
     while batches:  # loop until all files are copied
         if batchCopier.gettotalSize() < scratchSpaceAvailable:
-            filesToCopy = ""
-            for lazBatch in batches:
-                size = lazBatch["size"]
-                if (spaceUtilizationFactorIndexing * size) + (batchCopier.gettotalSize()) <= scratchSpaceAvailable:
-                    filesToCopy += " " + lazBatch["files"]
-                    batchCopier.copyFiles(filesToCopy, size, scratchInputDir)
+            currbatches = batches.copy()
+            for lazBatch in currbatches:
+                if lazBatch["status"] == "skip":
+                    skipPartitions.append(lazBatch)
+                    batches.remove(lazBatch)
+                    continue
+                if (spaceUtilizationFactorIndexing * lazBatch["size"]) + (batchCopier.gettotalSize()) <= scratchSpaceAvailable:
+                    batchCopier.copyFiles( lazBatch["files"], lazBatch["size"], scratchInputDir, lazBatch["id"])
+                    if batchCopier.gettotalSize() > scratchSpaceAvailable:
+                        print(bcolors.WARNING, "\tWARNING: Space utilization exceeded in indexing after copying partition " + str(lazBatch["id"]) + ". Total space utilization:" + str(batchCopier.gettotalSize()) + " bytes, Max allowed:" + str(scratchSpaceAvailable) + " bytes", bcolors.ENDC)
                     batches.remove(lazBatch)
                    # spaceleft -= size
-                    with open(scratchOutDir + "/.indexing_copy_done_signals/batchno_" + str(batchCopier.getNumBatchesCopied()) + "_copied",
+                    with open(scratchOutDir + "/.indexing_copy_done_signals/batchno_" + str(batchCopier.getNumBatchesCopied() - 1) + "_copied",
                               "w") as signalToPotreeConverterMPI:  # signal to potree converter
-                        signalToPotreeConverterMPI.write(" ".join(map(lambda x: str(scratchInputDir + "/" + Path(x).name), filesToCopy.split())))  # write the copied files to the signal file
+                        signalToPotreeConverterMPI.write(" ".join(map(lambda x: str(scratchInputDir + "/" + Path(x).name), lazBatch["files"].split())))  # write the copied files to the signal file
                         if (batches == []):
                             signalToPotreeConverterMPI.write("\nlastbatch")
                         else:
                             signalToPotreeConverterMPI.write("\nnotlastbatch")
 
-        else:
-            if not batchCopier.isbatchDictEmpty():
-                print("\tWaiting for indexing to finish for batches " + ",".join(map(str, batchCopier.getCopiedBatchesKeys())))
-            time.sleep(60)
+
         for signal in glob.glob(scratchOutDir + "/.indexing_done_signals/batchno*"):
             PotreeConverterMPIsignalFile = Path(signal)
             batchNum = int(PotreeConverterMPIsignalFile.stem.split("_")[1])
@@ -255,7 +301,7 @@ def indexing(batches):
                 duration = float(signalFile.read())
             batchCopier.addExecutionTime(duration)
             batchCopier.addWaitingTime(tend - duration)
-            print("\tBatch " +str(batchNum) + " indexed in " +str(duration) + "seconds")
+            print("\tBatch-" +str(batchNum) + "/Partition-" + str(batchCopier.getPartitionNum(batchNum)) + " indexed in " +str(duration) + " seconds")
             #spaceleft += size
             # with open(signal, "r") as chunks:
             #     chunkFiles = chunks.read()
@@ -266,25 +312,29 @@ def indexing(batches):
             #     batchCopier.removeFiles(chunkFiles)
             #     spaceleft += totalChunkSize
             # signal file for counting = Path(signal) #signal file for counting
-            batchCopier.removeBatch(batchNum)
-            PotreeConverterMPIsignalFile.unlink()  # remove the signal file
-
+            # remove the signal file
             filestoCat = []
             totalOctreeSize = 0
             for octree in glob.glob(scratchOutDir + "/octree*.bin"):
-                octreePath = Path(octree)
-                filestoCat += octree
-                totalOctreeSize += octreePath.stat().st_size
-                filestoCat.sort(key=lambda x: int(Path(x).stem.split("_")[1]), reverse=True)
-
+                filestoCat.append(octree)
+                totalOctreeSize += Path(octree).stat().st_size
+            filestoCat.sort(key=lambda x: int(Path(x).stem.split("_")[1]), reverse=True)
             concatStart = time.time()
             batchCopier.concatFiles(" ".join(filestoCat), storageOutDir + "/octree.bin")
+            indexingDone.append(str(batchNum) + "/" + str(batchCopier.getPartitionNum(batchNum)))
+            numFilesdone += len(batchCopier.getFiles(batchNum).split())
+            numBatches += 1
+            #print("\tConcatenated octree files  of " + str(batchNum) + " to " +  storageOutDir + "/octree.bin"  +" in " + str(time.time() - concatStart) + " seconds")
             batchCopier.removeFiles(" ".join(filestoCat))
-            print("\tConcatenated octree files  of " + str(batchNum) + " in " + str(time.time() - concatStart) + " seconds")
+            batchCopier.removeBatch(batchNum)
+            batchCopier.setTotalSize(max(0, batchCopier.gettotalSize()))
+            PotreeConverterMPIsignalFile.unlink()
             #batchCopier.setTotalSize(batchCopier.gettotalSize() - totalOctreeSize)
             open(scratchOutDir + "/.indexing_copy_done_signals/batchno_" + str(batchNum) + "_concatenated", "w").close()
-            batchCopier.setTotalSize(min(scratchSpaceAvailable, batchCopier.gettotalSize()))
-    #open(scratchOutDir + "/.indexing_copy_done_signals/nomorefilesleftforindexing", "w").close()
+        if not batchCopier.isbatchDictEmpty():
+            print("\tIndexing pending for batches/partitions: " + ",".join(map(lambda x: str(x) + "/" + str(batchCopier.getPartitionNum(x)), batchCopier.getCopiedBatchesKeys())) + ". Skipped partition no.s :" + ",".join(map(lambda x: str(x["id"]), skipPartitions)) + ". Done batch/partition no.s: " + ",".join(indexingDone))
+            time.sleep(60)
+    
     while not batchCopier.isbatchDictEmpty():
         for signal in glob.glob(scratchOutDir + "/.indexing_done_signals/batchno*"):
             PotreeConverterMPIsignalFile = Path(signal)
@@ -294,7 +344,7 @@ def indexing(batches):
                 duration = float(signalFile.read())
             batchCopier.addExecutionTime(duration)
             batchCopier.addWaitingTime(tend - duration)
-            print("\tBatch " +str(batchNum) + " done counting in " +str(duration) + "seconds")
+            print("\tBatch-" +str(batchNum) + "/Partition-" + str(batchCopier.getPartitionNum(batchNum)) + " indexed in " +str(duration) + " seconds")
             #spaceleft += size
             # with open(signal, "r") as chunks:
             #     chunkFiles = chunks.read()
@@ -305,89 +355,32 @@ def indexing(batches):
             #     batchCopier.removeFiles(chunkFiles)
             #     spaceleft += totalChunkSize
             # signal file for counting = Path(signal) #signal file for counting
-            batchCopier.removeBatch(batchNum)
-            PotreeConverterMPIsignalFile.unlink()
             filestoCat = []
             totalOctreeSize = 0
             for octree in glob.glob(scratchOutDir + "/octree*.bin"):
-                octreePath = Path(octree)
-                filestoCat += octree
-                totalOctreeSize += octreePath.stat().st_size
-                filestoCat.sort(key=lambda x: int(Path(x).stem.split("_")[1]), reverse=True)
-            concatStart = time.time()
+                filestoCat.append(octree)
+                totalOctreeSize += Path(octree).stat().st_size
+            filestoCat.sort(key=lambda x: int(Path(x).stem.split("_")[1]), reverse=True)
             batchCopier.concatFiles(" ".join(filestoCat), storageOutDir + "/octree.bin")
+            indexingDone.append(str(batchNum) + "/" + str(batchCopier.getPartitionNum(batchNum)))
+            numFilesdone += len(batchCopier.getFiles(batchNum).split())
+            numBatches += 1
+            #print("\tConcatenated octree files  of " + str(batchNum) + " to " +  storageOutDir + "/octree.bin"  +" in " + str(time.time() - concatStart) + " seconds")
             batchCopier.removeFiles(" ".join(filestoCat))
-            print("\tConcatenated octree files  of " + str(batchNum) + " in " + str(time.time() - concatStart) + " seconds")
-            #batchCopier.setTotalSize(batchCopier.gettotalSize() - totalOctreeSize)
-
+            batchCopier.removeBatch(batchNum)
+            batchCopier.setTotalSize(max(0, batchCopier.gettotalSize()))
+            PotreeConverterMPIsignalFile.unlink()
+        #batchCopier.setTotalSize(batchCopier.gettotalSize() - totalOctreeSize)
             open(scratchOutDir + "/.indexing_copy_done_signals/batchno_" + str(batchNum) + "_concatenated", "w").close()
-            batchCopier.setTotalSize(min(batchCopier.gettotalSize(), scratchSpaceAvailable))
         if not batchCopier.isbatchDictEmpty():
-            print("\tWaiting for indexing to finish for batches " + ",".join(map(str, batchCopier.getCopiedBatchesKeys())))
-        time.sleep(60)
+            print("\tIndexing pending for batches/partitions: " + ",".join(map(lambda x: str(x) + "/" + str(batchCopier.getPartitionNum(x)), batchCopier.getCopiedBatchesKeys())) + ". Skipped partition no.s:" + ",".join(map(lambda x: str(x["id"]), skipPartitions)) + ". Done batch/partition no.s: " + ",".join(indexingDone))
+            time.sleep(60)
+    print("\tIndexing finished. Total " + str(numFilesdone) + " files indexed in " + str(numBatches) + " partitions. Total partitions: " + str(totalBatches) + ", skipped " + str(len(skipPartitions)))
 
-
-def monitorPotreeConverterMPIJob(q):
-    # Submit a job with sbatch and get the job id
-    print("Submitting PotreeConverterMPI job...")
-    cmd = shutil.which("sbatch")  + " " + sbatchScript + " " + scratchOutDir + " " + scratchInputDir + "_headers"
-    process = subprocess.run(cmd, shell=True,  capture_output=True, encoding="utf-8")
-    if process.returncode != 0:
-        print("Something went wrong in submitting the job")
-        exit(1)
-    output = process.stdout
-    JID = output.split()[-1]
-    print("Submitted PotreeConverterMPI job with job id: " + JID)
-
-
-    q.put(JID)
-
-
-
-    ST = "PENDING"  # Status to be checked
-
-    while not ST.startswith("RUNNING"):
-        print("Waiting for PotreeConverterMPI job to start...")
-        cmd = shutil.which("sacct") + " -j " + JID + " -o State"
-        process = subprocess.run(cmd, shell=True,  capture_output=True, encoding="utf-8")
-        if process.returncode != 0:
-            print("Something went wrong in checking the job status")
-            exit(1)
-        output = process.stdout
-        ST = output.split()[-1]
-
-        time.sleep(15)
-
-    print("PotreeConverterMPI job started at " + str(datetime.now()))
-    # Monitoring loop
-    while not ST.startswith("COMPLETED"):
-        cmd = shutil.which("sacct") + " -j " + JID + " -o State"
-        process = subprocess.run(cmd, shell=True,  capture_output=True, encoding="utf-8")
-        if process.returncode != 0:
-            print("Something went wrong in checking the job status")
-            exit(1)
-        output = process.stdout
-        ST = output.split()[-1]
-
-        time.sleep(15)  # Time interval between checks
-
-        if ST.startswith("FAILED"):
-            print(f"PotreeConverterMPI job failed")  # Show humans some info if the job fails
-            exit(1)
-        elif ST.startswith("CANCELLED"):
-            print(f"PotreeConverterMPI job cancelled")  # Show humans some info if the job is cancelled
-            exit(1)
-        elif ST.startswith("TIMEOUT"):
-            print(f"PotreeConverterMPI job timeout")
-            exit(1)
-
-    print(f"PotreeConverterMPI Job finished")  # Show humans some info when the job finishes
-    exit(0)
 
 
 def createPartitions():
     print("Creating partitions...")
-
 
     lazfileStats = {}
     with open(AHN3partitions, "r", newline='') as partitionFile:
@@ -406,21 +399,25 @@ def createPartitions():
 
     for id in lazfileStats:
         partitionSize = sum((Path(storageInputDir + "/" + url.split("/")[-1]).stat().st_size) for url in lazfileStats[id]["ahn3_url"])
+
+        filesinPartition = {}
+        filesinPartition["size"] = partitionSize
+        filesinPartition["files"] = ""
+        filesinPartition["id"] = id
+        for url in lazfileStats[id]["ahn3_url"]:
+            filesinPartition["files"] += " " + (storageInputDir + "/" + url.split("/")[-1])
+            # lazPartitions.append(" ".join(filesinPartition))
+
         if max(spaceUtilizationFactorIndexing,spaceUtilizationFactorCounting) * partitionSize <= scratchSpaceAvailable:
-            filesinPartition = {}
-            filesinPartition["size"] = partitionSize
-            filesinPartition["files"] = ""
-            for url in lazfileStats[id]["ahn3_url"]:
-                filesinPartition["files"] += " " + (storageInputDir + "/" + url.split("/")[-1])
-                # lazPartitions.append(" ".join(filesinPartition))
-            lazPartitions.append(filesinPartition)
+            filesinPartition["status"] = "do"
         else:
+            filesinPartition["status"] = "skip"
             print("Partition " + id + " size: " + str(partitionSize) + " bytes")
             print("Scratch space available: " + str(scratchSpaceAvailable) + " bytes")
             print("Scratch space needed: " + str( max(spaceUtilizationFactorIndexing,spaceUtilizationFactorCounting) * partitionSize) + " bytes")
             print("Partition too big for scratch space, skipping partition " + id)
-
-    print("Done creating partitions")
+        lazPartitions.append(filesinPartition)
+    print("Done creating partitions. Total partitions: " + str(len(lazPartitions)))
 
     return lazPartitions
 
@@ -453,15 +450,15 @@ def createDirectories():
     if not Path(storageInputDir).exists():
         print("Storage input directory does not exist")
         exit(1)
-    elif not Path(scratchInputDir + "_headers").exists():
+    elif not Path(headersDir).exists():
         print("Headers directory for input data does not exist. It should be named " + scratchInputDir + "_headers")
         exit(1)
     else:
         pathsCount = 0
         for path in glob.glob(storageInputDir + "/*.[lL][aA][zZ]"):
             pathsCount += 1
-            if not Path(scratchInputDir + "_headers" + "/" + Path(path).stem + ".json").exists():
-                print("Header file for " + Path(path).name + " does not exist. It should have the same name as the LAZ file with \".json\" extension and be in the " + scratchInputDir + "_headers directory")
+            if not Path(headersDir + "/" + Path(path).stem + ".json").exists():
+                print("Header file for " + Path(path).name + " does not exist. It should have the same name as the LAZ file with \".json\" extension and be in the " + headersDir + " directory")
                 exit(1)
         if pathsCount == 0:
             print("No LAZ files found in storage input directory")
@@ -518,35 +515,15 @@ if __name__ == "__main__":
     #
     # Create directories
     createDirectories()
-    q = Queue()
-    PotreeConverterMPIMonitorProcess = Process(target=monitorPotreeConverterMPIJob, args=(q,))
-    PotreeConverterMPIMonitorProcess.start()
     PotreeConverterMPICopier = Process(target=PotreeConverterMPIBatched)
     PotreeConverterMPICopier.start()
 
-    while PotreeConverterMPIMonitorProcess.is_alive() and PotreeConverterMPICopier.is_alive():
-        time.sleep(30)
+    PotreeConverterMPICopier.join()
 
-    if PotreeConverterMPICopier.exitcode != 0 and PotreeConverterMPIMonitorProcess.is_alive():
-        print("PotreeConverterMPICopier failed")
-        cancelCmd = shutil.which("scancel") + " " + str(q.get())
-        cmdOut = subprocess.run(cancelCmd, shell=True, capture_output=True, encoding="utf-8")
-        if cmdOut.returncode != 0:
-            print("Error cancelling job:\n" + cmdOut.stderr)
+    if PotreeConverterMPICopier.exitcode != 0:
+        print("PotreeConverterMPIBatched exited with code " + str(PotreeConverterMPICopier.exitcode))
         exit(1)
-    elif PotreeConverterMPIMonitorProcess.exitcode != 0 and PotreeConverterMPICopier.is_alive():
-        parent = psutil.Process(PotreeConverterMPICopier.pid)
-        for child in parent.children(recursive=True):
-            child.kill()
-        PotreeConverterMPICopier.terminate()
-        print("PotreeConverterMPICopier terminated")
-        exit(1)
-    elif PotreeConverterMPIMonitorProcess.exitcode != 0 and PotreeConverterMPICopier.exitcode != 0:
-        print("PotreeConverterMPICopier failed")
-        exit(1)
-    else:
-        print("PotreeConverterMPI and PotreeConverterMPICopier done")
-        exit(0)
+
 
 
 

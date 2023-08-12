@@ -143,14 +143,14 @@ namespace indexer{
 			this->path = path;
 
 
-			//this->clear();
+			this->clear();
 		}
 
-		/*void clear(){
+		void clear(){
 			fs::remove_all(path);
 
 			fs::create_directories(path);
-		}*/
+		}
 
 		void write(Node* node, int hierarchyStepSize){
 			lock_guard<mutex> lock(mtx);
@@ -205,7 +205,7 @@ namespace indexer{
 				}
 			}
 
-			//fs::create_directories(path);
+			fs::create_directories(path);
 
 			// this structure, but guaranteed to be packed
 			// struct Record{                 size   offset
@@ -402,7 +402,7 @@ namespace indexer{
 			this->targetDir = targetDir;
 
 			writer = make_shared<Writer>(this);
-			hierarchyFlusher = make_shared<HierarchyFlusher>(targetDir + "/.hierarchyChunks_" + to_string(task_id));
+			hierarchyFlusher = make_shared<HierarchyFlusher>(targetDir + "/.hierarchyChunks/hierarchyChunks_" + to_string(task_id));
 
             //Assuming all other datatypes are smaller than int64 and double.
             maxVarSize = std::max(sizeof(int64_t), sizeof(double));

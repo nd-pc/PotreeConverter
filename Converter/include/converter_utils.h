@@ -98,7 +98,6 @@ public:
 inline vector<Source> curateSources(vector<string> paths) {
 
 
-    cout << "#paths: " << paths.size() << endl;
 
     vector<Source> sources;
     sources.reserve(paths.size());

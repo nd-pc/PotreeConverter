@@ -23,8 +23,8 @@ namespace chunker_countsort_laszip {
         vector<int> grid;
     };
 
-	NodeLUT doCounting(Vector3 min, Vector3 max, State& state, string targetDir, Attributes outputAttributes, Monitor* monitor);
-    void doDistribution(Vector3 min, Vector3 max, State& state, NodeLUT lut, string targetDir, vector<Source> sources, Attributes outputAttributes, Monitor* monitor);
+	NodeLUT doCounting(Vector3 min, Vector3 max, State& state, string targetDir, Attributes &outputAttributes, Monitor* monitor);
+    void doDistribution(Vector3 min, Vector3 max, State& state, NodeLUT lut, string targetDir, vector<Source> sources, Attributes &outputAttributes, Monitor* monitor);
 
 
 

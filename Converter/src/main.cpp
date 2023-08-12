@@ -49,7 +49,7 @@ Options parseArguments(int argc, char** argv) {
 
     if (!args.has("header-dir")) {
         cout << "No headers directory specified" << endl;
-        cout << "PotreeConverter  -o <outdir> --head-dir <header-dir>" << endl;
+        cout << "PotreeConverterMPI  -o <outdir> --head-dir <header-dir>" << endl;
         cout << endl << "For a list of options, use --help or -h" << endl;
 
         exit(1);
@@ -60,7 +60,7 @@ Options parseArguments(int argc, char** argv) {
     if (!fs::is_directory(headerDir)) {
 
         cout << "header-dir is not a directory" << endl;
-        cout << "PotreeConverter -i <input data directory> -o <outdir> --head-dir <header-dir>" << endl;
+        cout << "PotreeConverterMPI -i <input data directory> -o <outdir> --head-dir <header-dir>" << endl;
         cout << endl << "For a list of options, use --help or -h" << endl;
 
         exit(1);
@@ -74,7 +74,7 @@ Options parseArguments(int argc, char** argv) {
 		outdir = args.get("outdir").as<string>();
 	} else {
         cout << "No output directory specified" << endl;
-        cout << "PotreeConverter  -o <outdir> --head-dir <header-dir>" << endl;
+        cout << "PotreeConverterMPI  -o <outdir> --head-dir <header-dir>" << endl;
         cout << endl << "For a list of options, use --help or -h" << endl;
 
         exit(1);
@@ -463,7 +463,7 @@ void finalMerge(Options& options, string targetDir, State& state, indexer::Index
 
     }
 }
-void process(Options& options, Stats& stats, State& state, string targetDir, Attributes outputAttributes, Monitor* monitor) {
+void process(Options& options, Stats& stats, State& state, string targetDir, Attributes &outputAttributes, Monitor* monitor) {
 
     chunker_countsort_laszip::NodeLUT lut;
         if (options.noChunking) {
@@ -493,9 +493,10 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
         }
     MPI_Barrier(MPI_COMM_WORLD);
 
-    int batchNum = 1;
+    int batchNum = 0;
     bool isLastbatch = false;
     indexer::Indexer indexer(targetDir);
+    indexer.root = make_shared<Node>("r", stats.min, stats.max);
     shared_ptr<indexer::Chunks> chunks;
     if(task_id == MASTER)RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
     if(task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
@@ -508,8 +509,19 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
     while (!isLastbatch) {
         // cout << "waiting for file" << endl;
         fstream batchfiles;
+        string line2 = "";
 
+        while (line2 != "notlastbatch" && line2 != "lastbatch"){
+            // cout << "waiting for file" << endl;
+            batchfiles.open(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+            string line1;
+            getline(batchfiles, line1);
+            getline(batchfiles, line2);
+            batchfiles.close();
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
         batchfiles.open(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+
         string lazFiles;
         getline(batchfiles, lazFiles);
         vector<string> lazFilesVec = splitString(" ", lazFiles);
@@ -517,25 +529,33 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
         getline(batchfiles, lastbatch);
         if (lastbatch == "lastbatch") {
             isLastbatch = true;
+        } else if (lastbatch == "notlastbatch") {
+            isLastbatch = false;
+        } else {
+            cout << "ERROR: unkown batch type: " << lastbatch << endl;
+            exit(123);
         }
         if (task_id == MASTER) {
-
             auto sources = curateSources(lazFilesVec);
             RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Distribution time");
             auto tStart = now();
             chunker_countsort_laszip::doDistribution(stats.min, stats.max, state, lut, targetDir, sources,
                                                      outputAttributes, monitor);
             duration += now() - tStart;
-             RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Distribution time");
+            logger::INFO("Grid errors in distribution till now: " + to_string(logger::totalGridErrors));
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Distribution time");
 
     }
         if(task_id == MASTER)RECORD_TIMINGS_START (recordTimings::Machine::cpu, "wait time for concatenating octree files");
-        while (!fs::exists(fs::path(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated")) && ((batchNum - 1) > 0)) {
+        while (!fs::exists(fs::path(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated")) && ((batchNum - 1) >= 0)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
         if (task_id == MASTER) RECORD_TIMINGS_STOP (recordTimings::Machine::cpu, "wait time for concatenating octree files");
         MPI_Barrier(MPI_COMM_WORLD);
-        if(task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing time");
+        if(task_id == MASTER) {
+            fs::remove(fs::path(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing time");
+        }
         auto tStart = now();
         chunks = indexing(options, targetDir, state, indexer, isLastbatch);
         duration += now() - tStart;
@@ -569,7 +589,9 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
 
     if(task_id == MASTER) {
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Final merge time");
+        cout << "Final merge..." << endl;
         finalMerge(options, targetDir, state, indexer, chunks);
+        cout << "Final merge done" << endl;
         fstream signalToCopier;
         signalToCopier.open(targetDir + "/.indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexed", ios::out);
         signalToCopier << to_string(duration);
@@ -777,7 +799,7 @@ int main(int argc, char **argv) {
         //fs::remove_all(targetDir);
         //fs::create_directories(targetDir);
         fs::create_directories(targetDir + "/chunks");
-        fs::create_directories(targetDir + "/.hierarchyChunks");
+        //fs::create_directories(targetDir + "/.hierarchyChunks");
         logger::addOutputFile(logFile);
     }
     MPI_Barrier(MPI_COMM_WORLD);
@@ -811,7 +833,7 @@ int main(int argc, char **argv) {
 
     if(task_id == MASTER) RECORD_TIMINGS_PRINT(cout);
 
-MPI_Finalize();
+    MPI_Finalize();
 
-return 0;
+    return 0;
 }

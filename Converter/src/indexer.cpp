@@ -1796,6 +1796,9 @@ namespace indexer {
 
         string octreePath = indexer->targetDir + "/octree_" + to_string(task_id) + ".bin";
         fsOctree.open(octreePath, ios::out | ios::binary);
+        this->closed = false;
+        this->closeRequested = false;
+        this->activeBuffer = nullptr;
 
         launchWriterThread();
     }
@@ -1881,6 +1884,10 @@ namespace indexer {
     void Writer::launchWriterThread() {
         thread([&]() {
 
+            indexer->bytesInMemory = 0;
+            indexer->bytesWritten = 0;
+            indexer->bytesToWrite = 0;
+
             while (true) {
 
                 shared_ptr<Buffer> buffer = nullptr;
@@ -1962,7 +1969,7 @@ namespace indexer {
         //-------------------MPI--------------
         indexer.options = options;
         indexer.attributes = attributes;
-        indexer.root = make_shared<Node>("r", chunks->min, chunks->max);
+        //indexer.root = make_shared<Node>("r", chunks->min, chunks->max);
         indexer.spacing = (chunks->max - chunks->min).x / 128.0;
 
         auto onNodeCompleted = [&indexer](Node *node) {
@@ -2074,12 +2081,10 @@ namespace indexer {
 
                                 activeThreads--;
                             });
-
         /*for (auto chunk : chunks->list) {
             auto task = make_shared<Task>(chunk);
             pool.addTask(task);
         }*/
-
         auto tStartIndexing = now();
         vector<shared_ptr<Task>> tasks;
         for (auto chunk: chunks->list) {
@@ -2089,6 +2094,12 @@ namespace indexer {
             }
             tasks.push_back(task);
         }
+        cout << "Total number of chunks: " << tasks.size() << endl;
+        int n_chunks = 0;
+        for (int i = task_id; i < tasks.size(); i += n_tasks) {
+            n_chunks++;
+        }
+        cout << "Process " << task_id << " has " << n_chunks  << endl;
         for (int i = task_id; i < tasks.size(); i += n_tasks) {
             pool.addTask(tasks[i]);
         }
@@ -2109,7 +2120,18 @@ namespace indexer {
         cout << "Process " << task_id << " taskpool finished." << endl;
         cout.flush();
 
-        MPI_Bcast(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, MASTER, MPI_COMM_WORLD);
+        //MPI_Bcast(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, MASTER, MPI_COMM_WORLD);
+
+
+        if(task_id == MASTER) {
+            for (int i = 0; i < n_tasks; i++) {
+                if (i != MASTER) {
+                    MPI_Send(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, i, 30, MPI_COMM_WORLD);
+                }
+            }
+        } else {
+            MPI_Recv(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, MASTER, 30, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
 
         indexer.processOctreeFileOffset = indexer.currentTotalOctreeFileSize;
 
@@ -2144,10 +2166,13 @@ namespace indexer {
             indexer.writer->closeAndWait();
             indexer.byteOffset = 0;
             indexer.octreeFileSize = 0;
+            indexer.fcrMPIsend = nullptr;
         }
         else if (task_id != MASTER) {
             indexer.writer->closeAndWait();
         }
+
+
 
         printElapsedTime("Indexing completed by process " + std::to_string(task_id) + " in", tStartIndexing);
 

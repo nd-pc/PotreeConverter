@@ -7,6 +7,8 @@ using std::string;
 
 namespace logger {
 
+    extern int totalGridErrors;
+
 	void addOutputFile(string path);
 
 	void info(string msg, string file, int line);

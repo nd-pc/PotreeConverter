@@ -162,7 +162,6 @@ namespace chunker_countsort_laszip {
                 if(state.currentPass == 1) {
                     attributeIntensity->min.x = std::min(attributeIntensity->min.x, double(point->intensity));
                     attributeIntensity->max.x = std::max(attributeIntensity->max.x, double(point->intensity));
-                    attributeIntensity->max.x = std::max(attributeIntensity->max.x, double(point->intensity));
                 }
             };
 
@@ -430,15 +429,14 @@ namespace chunker_countsort_laszip {
 
     }
 
-	void countPointsInCells(vector<Source> sources, Vector3 min, Vector3 max, vector<std::atomic_int32_t>& grid, int64_t gridSize, State& state, Attributes& outputAttributes, Monitor* monitor) {
+	void countPointsInCells(vector<Source> &sources, Vector3 min, Vector3 max, vector<std::atomic_int32_t>& grid, int64_t gridSize, State& state, Attributes& outputAttributes, Monitor* monitor) {
 
 		cout << endl;
 		cout << "=======================================" << endl;
 		cout << "=== COUNTING                           " << endl;
 		cout << "=======================================" << endl;
-
+        cout << "Total LAZ files: " << sources.size() << endl;
 		auto tStart = now();
-
 		//Vector3 size = max - min;
 
 
@@ -540,11 +538,12 @@ namespace chunker_countsort_laszip {
                 double dGridSize = double(gridSize);
 
                 double coordinates[3];
+                auto aPosition = outputAttributesCopy.get("position");
 
                 auto posScale = outputAttributes.posScale;
                 auto posOffset = outputAttributes.posOffset;
 
-                // for ecah point determine the cell of the grid it belongs and increment it
+                // for each point determine the cell of the grid it belongs and increment it
                 for (int i = 0; i < numToRead; i++) {
                     int64_t pointOffset = i * bpp;
 
@@ -591,6 +590,14 @@ namespace chunker_countsort_laszip {
                         int64_t index = ix + iy * gridSize + iz * gridSize * gridSize;
 
                         grid[index]++;
+
+                        aPosition->min.x = std::min(aPosition->min.x, x);
+                        aPosition->min.y = std::min(aPosition->min.y, y);
+                        aPosition->min.z = std::min(aPosition->min.z, z);
+
+                        aPosition->max.x = std::max(aPosition->max.x, x);
+                        aPosition->max.y = std::max(aPosition->max.y, y);
+                        aPosition->max.z = std::max(aPosition->max.z, z);
                     }
 
                     // for each attribute, compute min/max and histogram
@@ -764,7 +771,7 @@ namespace chunker_countsort_laszip {
 		cout << "=======================================" << endl;
 		cout << "=== CREATING CHUNKS                    " << endl;
 		cout << "=======================================" << endl;
-
+        cout << "Total LAZ files: " << sources.size() << endl;
 		auto tStart = now();
 
 		state.pointsProcessed = 0;
@@ -860,7 +867,6 @@ namespace chunker_countsort_laszip {
 				laszip_open_reader(laszip_reader, path.c_str(), &is_compressed);
 				laszip_get_header_pointer(laszip_reader, &header);
 				laszip_get_point_pointer(laszip_reader, &point);
-
 				laszip_seek_point(laszip_reader, task->firstPoint);
 				
 				auto attributeHandlers = createAttributeHandlers(header, data, point, inputAttributes, outputAttributesCopy, state);
@@ -888,13 +894,13 @@ namespace chunker_countsort_laszip {
 						memcpy(data + offset + 4, &Y, 4);
 						memcpy(data + offset + 8, &Z, 4);
 
-						aPosition->min.x = std::min(aPosition->min.x, x);
+						/*aPosition->min.x = std::min(aPosition->min.x, x);
 						aPosition->min.y = std::min(aPosition->min.y, y);
 						aPosition->min.z = std::min(aPosition->min.z, z);
 
 						aPosition->max.x = std::max(aPosition->max.x, x);
 						aPosition->max.y = std::max(aPosition->max.y, y);
-						aPosition->max.z = std::max(aPosition->max.z, z);
+						aPosition->max.z = std::max(aPosition->max.z, z);*/
 					}
 
 					// copy other attributes
@@ -967,14 +973,15 @@ namespace chunker_countsort_laszip {
 					ss << "point: " << formatNumber(x, 3) << ", " << formatNumber(y, 3) << ", " << formatNumber(z, 3) << endl;
 					ss << "3d grid index: " << ix << ", " << iy << ", " << iz << endl;
 					ss << "1d grid index: " << index << endl;
+                    ss <<   "file: " << task->path << endl;
 
 
 					logger::ERROR(ss.str());
-
-					exit(123);
+                    //N Ahmed: commented out for now, because it is not a critical error
+					//exit(123);
 				}
-
-				counts[nodeIndex]++;
+                else
+				    counts[nodeIndex]++;
 			}
 
 			// ALLOCATE BUCKETS
@@ -994,15 +1001,17 @@ namespace chunker_countsort_laszip {
 				auto index = toIndex(pointOffset);
 
 				auto nodeIndex = grid[index];
-				auto& node = nodes[nodeIndex];
+                if (nodeIndex != -1) {
+                    auto &node = nodes[nodeIndex];
 
-				if (nodeIndex == previousNodeIndex) {
-					previousBucket->write(&data[0] + pointOffset, bpp);
-				} else {
-					previousBucket = buckets[nodeIndex];
-					previousNodeIndex = nodeIndex;
-					previousBucket->write(&data[0] + pointOffset, bpp);
-				}
+                    if (nodeIndex == previousNodeIndex) {
+                        previousBucket->write(&data[0] + pointOffset, bpp);
+                    } else {
+                        previousBucket = buckets[nodeIndex];
+                        previousNodeIndex = nodeIndex;
+                        previousBucket->write(&data[0] + pointOffset, bpp);
+                    }
+                }
 			}
 
 			state.pointsProcessed += batchSize;
@@ -1313,7 +1322,7 @@ namespace chunker_countsort_laszip {
 		return {gridSize, lut};
 	}
 
-	NodeLUT doCounting(Vector3 min, Vector3 max, State& state, string targetDir, Attributes outputAttributes, Monitor* monitor) {
+	NodeLUT doCounting(Vector3 min, Vector3 max, State& state, string targetDir, Attributes &outputAttributes, Monitor* monitor) {
 
 
         //pointsTotal = sum of all num_points
@@ -1334,7 +1343,7 @@ namespace chunker_countsort_laszip {
         vector<std::atomic_int32_t> grid(gridSize * gridSize * gridSize);
         state.currentPass = 1;
 
-        int batchNum = 1;
+        int batchNum = 0;
         bool isLastBatch = false;
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
@@ -1342,10 +1351,20 @@ namespace chunker_countsort_laszip {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting");
+        int totalFilesCounted = 0;
         while (!isLastBatch) {
             // cout << "waiting for file" << endl;
-
             fstream batchfiles;
+            string line2 = "";
+            while (line2 != "notlastbatch" && line2 != "lastbatch"){
+                // cout << "waiting for file" << endl;
+                batchfiles.open(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+                string line1;
+                getline(batchfiles, line1);
+                getline(batchfiles, line2);
+                batchfiles.close();
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
             batchfiles.open(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
             string lazFiles;
             getline(batchfiles, lazFiles);
@@ -1353,6 +1372,11 @@ namespace chunker_countsort_laszip {
             getline(batchfiles, lastBatch);
             if (lastBatch == "lastbatch") {
                 isLastBatch = true;
+            } else if (lastBatch == "notlastbatch") {
+                isLastBatch = false;
+            } else {
+                cout << "ERROR: unkown batch type: " << lastBatch << endl;
+                exit(123);
             }
 
 
@@ -1379,6 +1403,7 @@ namespace chunker_countsort_laszip {
                                outputAttributes, monitor);
             auto duration = now() - tStart;
             RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "counting time");
+            totalFilesCounted += sources.size();
             fstream signalToCopier;
             signalToCopier.open(targetDir + "/.counting_done_signals/batchno_" + to_string(batchNum) + "_counted", ios::out);
             signalToCopier << to_string(duration);
@@ -1406,11 +1431,19 @@ namespace chunker_countsort_laszip {
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "merge time");
         auto lut = createLUT(grid, gridSize);
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "merge time");
+        int gridErrors = 0;
+        for (int i = 0; i < grid.size(); i++) {
+            if (grid[i] > 0 && lut.grid[i] == -1) {
+                gridErrors++;
+            }
+        }
+        logger::INFO("Number of gridErrors: " + to_string(gridErrors));
+        logger::INFO("Total files counted: "+ to_string(totalFilesCounted));
         return lut;
     }
 
 
-     void doDistribution(Vector3 min, Vector3 max, State& state, NodeLUT lut, string targetDir, vector<Source> sources, Attributes outputAttributes, Monitor* monitor) {
+     void doDistribution(Vector3 min, Vector3 max, State& state, NodeLUT lut, string targetDir, vector<Source> sources, Attributes &outputAttributes, Monitor* monitor) {
 			state.currentPass = 2;
             RECORD_TIMINGS_START(recordTimings::Machine::cpu, "distribution time");
 			distributePoints(sources, min, max, targetDir, lut, state, outputAttributes, monitor);

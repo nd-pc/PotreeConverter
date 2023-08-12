@@ -295,7 +295,7 @@ struct HierarchyBuilder{
 
         map<string, vector<string>> hierarchyFiletoPathMap;
         for (int i = 0; i < n_tasks; i++) {
-            for (auto& entry : fs::directory_iterator(path + "/../" + ".hierarchyChunks_" + to_string(i))) {
+            for (auto& entry : fs::directory_iterator(path + "/" + "hierarchyChunks_" + to_string(i))) {
                 auto filepath = entry.path();
                 if (iEndsWith(filepath.string(), ".bin")) {
                     hierarchyFiletoPathMap[filepath.filename().string()].push_back(filepath.string());
@@ -360,10 +360,8 @@ struct HierarchyBuilder{
 			f.close();
 		}
 		// redundant security check
-        for(int i = 0; i < n_tasks; i++) {
-            if (iEndsWith(this->path, ".hierarchyChunks_" + to_string(i))) {
-                fs::remove_all(this->path);
-            }
+        if(iEndsWith(this->path, ".hierarchyChunks")){
+            fs::remove_all(this->path);
         }
 
 		return;
