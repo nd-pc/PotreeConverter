@@ -1982,6 +1982,7 @@ namespace indexer {
         struct Task {
             shared_ptr<Chunk> chunk;
             shared_ptr<Node> chunkRootNode;
+            int64_t index;
 
             Task(shared_ptr<Chunk> chunk) {
                 this->chunk = chunk;
@@ -2092,6 +2093,7 @@ namespace indexer {
             if (task->chunkRootNode->name.size() > 1) {
                 indexer.root->addDescendant(task->chunkRootNode);
             }
+            task->index = tasks.size();
             tasks.push_back(task);
         }
         cout << "Total number of chunks: " << tasks.size() << endl;
@@ -2110,7 +2112,9 @@ namespace indexer {
         pool.waitTillEmpty();
         pool.close();
 
-        indexer.fChunkRoots.close();
+        if(islastbatch) {
+            indexer.fChunkRoots.close();
+        }
 
         if (task_id != MASTER) {
 
@@ -2120,10 +2124,10 @@ namespace indexer {
         cout << "Process " << task_id << " taskpool finished." << endl;
         cout.flush();
 
-        //MPI_Bcast(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, MASTER, MPI_COMM_WORLD);
+        MPI_Bcast(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, MASTER, MPI_COMM_WORLD);
 
 
-        if(task_id == MASTER) {
+        /*if(task_id == MASTER) {
             for (int i = 0; i < n_tasks; i++) {
                 if (i != MASTER) {
                     MPI_Send(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, i, 30, MPI_COMM_WORLD);
@@ -2131,7 +2135,7 @@ namespace indexer {
             }
         } else {
             MPI_Recv(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, MASTER, 30, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
+        }*/
 
         indexer.processOctreeFileOffset = indexer.currentTotalOctreeFileSize;
 
@@ -2168,8 +2172,22 @@ namespace indexer {
             indexer.octreeFileSize = 0;
             indexer.fcrMPIsend = nullptr;
         }
-        else if (task_id != MASTER) {
-            indexer.writer->closeAndWait();
+        else {
+
+            if(task_id == MASTER) {
+                for (int i = 0; i < n_tasks; i++) {
+                    if (i != MASTER) {
+                        int64_t octreeDepth;
+                        MPI_Recv(&octreeDepth, 1, MPI_INT64_T, i, 30, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                        if (octreeDepth > indexer.octreeDepth) {
+                            indexer.octreeDepth = octreeDepth;
+                        }
+                    }
+                }
+            } else {
+                MPI_Send(&indexer.octreeDepth, 1, MPI_INT64_T, MASTER, 30, MPI_COMM_WORLD);
+                indexer.writer->closeAndWait();
+            }
         }
 
 
@@ -2177,9 +2195,17 @@ namespace indexer {
         printElapsedTime("Indexing completed by process " + std::to_string(task_id) + " in", tStartIndexing);
 
             if (!options.keepChunks) {
-                for (int i = task_id; i < tasks.size(); i += n_tasks) {
+                /*for (int i = task_id; i < tasks.size(); i += n_tasks) {
                     fs::remove(tasks[i]->chunk->file);
-                }
+                }*/
+                auto removeFile = [](shared_ptr<Task> task) {
+                    if ( task->index % n_tasks == task_id) {
+                        fs::remove(task->chunk->file);
+                    }
+                };
+
+// Use std::for_each with std::execution::par to parallelize the operation.
+                std::for_each(std::execution::par, tasks.begin(), tasks.end(), removeFile);
             }
 
 
@@ -2230,7 +2256,8 @@ namespace indexer {
             auto node = nodes[0];
             indexer.root = node;
         } else if (!indexer.root->sampled) {*/
-        sampler.sample(indexer.root.get(), chunks->attributes, indexer.spacing, onNodeCompleted, onNodeDiscarded);
+        if (!indexer.root->sampled)
+            sampler.sample(indexer.root.get(), chunks->attributes, indexer.spacing, onNodeCompleted, onNodeDiscarded);
         //}
 
         // root is automatically finished after subsampling all descendants
@@ -2268,6 +2295,8 @@ namespace indexer {
 
         fs::remove(chunksMetadataPath);//string hierarchyPath = targetDir + "/hierarchy.bin";
 
+        // remove chunks directory
+        fs::remove(targetDir + "/chunks");
 
         //delete tmpChunkRoots files
         for (int i = 0; i < n_tasks; i++) {

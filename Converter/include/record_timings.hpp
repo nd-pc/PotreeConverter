@@ -234,9 +234,9 @@ using namespace std;
 
     extern map<string, vector<pid_t>> desc_thread_map;
 
-    extern pthread_mutex_t thread_time_record_map_lock;
+    extern pthread_mutex_t thread_time_record_map_mtx;
 
-    extern pthread_mutex_t desc_thread_map_lock;
+    extern pthread_mutex_t desc_thread_map_mtx;
 
 
     static inline pid_t get_thread_id() {
@@ -256,30 +256,28 @@ using namespace std;
 
 
         pid_t thread_id = get_thread_id();
-
+        pthread_mutex_lock(&desc_thread_map_mtx);
         if (desc_thread_map.contains(desc)){
             if (find(desc_thread_map.at(desc).cbegin(), desc_thread_map.at(desc).cend(), thread_id) == desc_thread_map.at(desc).cend()) {
-                pthread_mutex_lock(&desc_thread_map_lock);
                 desc_thread_map.at(desc).push_back(thread_id);
-                pthread_mutex_unlock(&desc_thread_map_lock);
             }
 
         } else{
-            pthread_mutex_lock(&desc_thread_map_lock);
             //cout << "1Descriptor, Thread ID" << desc << "," << thread_id << "\n";
             vector<pid_t> tmp;
             tmp.push_back(thread_id);
             desc_thread_map.emplace(desc, tmp);
-            pthread_mutex_unlock(&desc_thread_map_lock);
         }
+        pthread_mutex_unlock(&desc_thread_map_mtx);
 
+        pthread_mutex_lock(&thread_time_record_map_mtx);
         if(thread_time_record_map.contains(thread_id)){
+            pthread_mutex_unlock(&thread_time_record_map_mtx);
             thread_time_record_map.at(thread_id).start_timing(t, desc, line_start, file_name);
         }
         else{
-            pthread_mutex_lock(&thread_time_record_map_lock);
             thread_time_record_map.emplace(thread_id, Record_timings());
-            pthread_mutex_unlock(&thread_time_record_map_lock);
+            pthread_mutex_unlock(&thread_time_record_map_mtx);
             thread_time_record_map.at(thread_id).start_timing(t, desc, line_start, file_name);
         }
 
@@ -293,13 +291,16 @@ using namespace std;
 
         pid_t thread_id = get_thread_id();
 
+        pthread_mutex_lock(&thread_time_record_map_mtx);
         if(thread_time_record_map.contains(thread_id)){
+            pthread_mutex_unlock(&thread_time_record_map_mtx);
             thread_time_record_map.at(thread_id).stop_timing(t, desc, line_stop, file_name);
         }else {
-            cerr << "Unable to able to find thread record while stop timimg" << endl;
+            cerr << "Unable to able to find thread " << thread_id << " record while stop timimg" << endl;
+            pthread_mutex_unlock(&thread_time_record_map_mtx);
             exit(EXIT_FAILURE);
-
         }
+
     }
 
     /*void
@@ -450,8 +451,8 @@ using namespace std;
 #define RECORD_TIMINGS_INIT()\
     map<pid_t, recordTimings::Record_timings> recordTimings::thread_time_record_map;\
     map<string, vector<pid_t>> recordTimings::desc_thread_map;\
-    pthread_mutex_t recordTimings::thread_time_record_map_lock = PTHREAD_MUTEX_INITIALIZER;\
-    pthread_mutex_t recordTimings::desc_thread_map_lock = PTHREAD_MUTEX_INITIALIZER;\
+    pthread_mutex_t recordTimings::thread_time_record_map_mtx = PTHREAD_MUTEX_INITIALIZER;\
+    pthread_mutex_t recordTimings::desc_thread_map_mtx = PTHREAD_MUTEX_INITIALIZER;\
     bool recordTimings::disable = false;
 
 

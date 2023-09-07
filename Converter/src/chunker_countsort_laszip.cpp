@@ -1347,7 +1347,7 @@ namespace chunker_countsort_laszip {
         bool isLastBatch = false;
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
-        while (!fs::exists(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"))) {
+        while (!fs::exists(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting");
@@ -1355,17 +1355,20 @@ namespace chunker_countsort_laszip {
         while (!isLastBatch) {
             // cout << "waiting for file" << endl;
             fstream batchfiles;
-            string line2 = "";
-            while (line2 != "notlastbatch" && line2 != "lastbatch"){
-                // cout << "waiting for file" << endl;
-                batchfiles.open(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
-                string line1;
-                getline(batchfiles, line1);
-                getline(batchfiles, line2);
-                batchfiles.close();
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
             batchfiles.open(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+//            string line2 = "";
+//            while (line2 != "notlastbatch" && line2 != "lastbatch"){
+//                // cout << "waiting for file" << endl
+//                //batchfiles.open(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+//                string line1;
+//                getline(batchfiles, line1);
+//                getline(batchfiles, line2);
+//                batchfiles.seekg(0, ios::beg); // go back to the beginning of the file to re-read the first line
+//                //batchfiles.close();
+//                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+//            }
+//            //batchfiles.open(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+//            batchfiles.seekg(0, ios::beg);
             string lazFiles;
             getline(batchfiles, lazFiles);
             string lastBatch;
@@ -1380,13 +1383,13 @@ namespace chunker_countsort_laszip {
             }
 
 
-            vector<string> lazFilesVec = splitString(" ", lazFiles);
+            vector<string> lazFilesVec = splitString(",", lazFiles);
 
             auto sources = curateSources(lazFilesVec);
 
             batchfiles.close();
 
-            fs::remove(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"));
+            //fs::remove(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"));
 
 
 
@@ -1405,12 +1408,17 @@ namespace chunker_countsort_laszip {
             RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "counting time");
             totalFilesCounted += sources.size();
             fstream signalToCopier;
-            signalToCopier.open(targetDir + "/.counting_done_signals/batchno_" + to_string(batchNum) + "_counted", ios::out);
-            signalToCopier << to_string(duration);
+            signalToCopier.open(targetDir + "/.counting_done_signals/batchno_" + to_string(batchNum) + "_counting_done", ios::out);
+            signalToCopier << to_string(duration);//<< "\n" << "msgcomplete";
             signalToCopier.close();
+            {
+                fstream().open(
+                        targetDir + "/.counting_done_signals/batchno_" + to_string(batchNum) + "_counting"+ "_time_written",
+                        ios::out);
+            }
             batchNum++;
             RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting")
-            while (!fs::exists(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"))) {
+            while (!fs::exists(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
                 if (isLastBatch)
                     break;
                 else
