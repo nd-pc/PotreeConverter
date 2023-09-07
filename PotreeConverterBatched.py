@@ -112,6 +112,20 @@ class PotreeConverterBatched:
                     self.maxTmpSpaceAvailable = eval(config["TMP_STORAGE"]["MaxTmpSpaceAvailable"])
                 self.countingBatchSize = eval(config["TMP_STORAGE"]["CountingBatchSize"])
                 self.lazCompressionRatio = eval(config["TMP_STORAGE"]["LazCompressionRatio"])
+        if "COPIER" not in sections:
+            self.copierType = config["DEFAULT"]["CopierType"]
+        else:
+            self.copierType = config["COPIER"]["CopierType"]
+
+        if self.copierType == "local":
+             self.countingBatchCopier = LocalCopier(self.logger)
+             self.indexingBatchCopier = LocalCopier(self.logger, self.lazCompressionRatio)
+             self.miscCopier = LocalCopier(self.logger)
+        else:
+            self.logger.error("Copier type not recognized")
+            exit(1)
+
+        self.createDirectories()
 
         if "SLURM_SCHEDULER" not in sections and "LOCAL_SCHEDULER" not in sections and "TORQUE_SCHEDULER" not in sections:
             self.logger.error(
@@ -178,18 +192,7 @@ class PotreeConverterBatched:
                                        "ConverterOptions"] + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir)
             self.programCommand = shutil.which("qsub") + " " + self.tmpDir + "/qsubScript.sh"
             self.scheduler = QsubScheduler(self.programCommand, self.programName, self.logger)
-        if "COPIER" not in sections:
-            self.copierType = config["DEFAULT"]["CopierType"]
-        else:
-            self.copierType = config["COPIER"]["CopierType"]
 
-        if self.copierType == "local":
-            self.countingBatchCopier = LocalCopier(self.logger)
-            self.indexingBatchCopier = LocalCopier(self.logger, self.lazCompressionRatio)
-            self.miscCopier = LocalCopier(self.logger)
-        else:
-            self.logger.error("Copier type not recognized")
-            exit(1)
 
     def bordered(self, text):
         lines = text.split("\n")
@@ -260,9 +263,11 @@ class PotreeConverterBatched:
                 signalToPotreeConverterMPI.write("\nnotlastbatch")
         open(signalDir + "/" + "batchno_" + str(batchCopier.getNumBatchesCopied() - 1) + "_written", "w").close()
 
-    def counting(self):
+    def counting(self, lazPartitions):
         self.logger.info("Batch copier for counting started", color="blue", bold=True)
-        self.lazFilestoProcess = glob.glob(self.InputDir + "/*.[lL][aA][zZ]")
+        for partition in lazPartitions:
+            self.lazFilestoProcess.extend(partition["files"])#glob.glob(self.InputDir + "/*.[lL][aA][zZ]")
+
         while self.lazFilestoProcess:  # loop until all files are copied
             if self.countingBatchCopier.gettotalSize() < self.maxTmpSpaceAvailable:
                 size = 0
@@ -398,27 +403,27 @@ class PotreeConverterBatched:
         elif not Path(self.lazHeadersToCopy).exists():
             self.logger.error("Headers directory for input data does not exist")
             exit(1)
-        # else:
-        #     pathsCount = 0
-        #     for path in glob.glob(self.InputDir + "/*.[lL][aA][zZ]"):
-        #         pathsCount += 1
-        #         if not Path(self.lazHeadersToCopy + "/" + Path(path).stem + ".json").exists():
-        #             self.logger.error("Header file for " + Path(path).name + " does not exist. It should have the same name as the LAZ file with \".json\" extension and be in the " + self.lazHeadersToCopy + " directory")
-        #             exit(1)
-        #     if pathsCount == 0:
-        #         self.logger.error("No LAZ files found in the input directory")
-        #         exit(1)
+        else:
+            pathsCount = 0
+            for path in glob.glob(self.InputDir + "/*.[lL][aA][zZ]"):
+                pathsCount += 1
+                if not Path(self.lazHeadersToCopy + "/" + Path(path).stem + ".json").exists():
+                    self.logger.error("Header file for " + Path(path).name + " does not exist. It should have the same name as the LAZ file with \".json\" extension and be in the " + self.lazHeadersToCopy + " directory")
+                    exit(1)
+            if pathsCount == 0:
+                self.logger.error("No LAZ files found in the input directory")
+                exit(1)
 
-        # if Path(self.tmpDir).exists():
-        #     print("Directory for temporarily storing partial input and output already exists. Do you want to overwrite it? (y/n)")
-        #     answer = input()
-        #     if answer == "y" or answer == "Y":
-        #         shutil.rmtree(self.tmpDir)
-        #     else:
-        #         self.logger.info("Directory for temporarily storing partial input and output already exists. Exiting on user request...")
-        #         exit(0)
-        #
-        # Path(self.tmpDir).mkdir()
+        if Path(self.tmpDir).exists():
+            print("Directory for temporarily storing partial input and output already exists. Do you want to overwrite it? (y/n)")
+            answer = input()
+            if answer == "y" or answer == "Y":
+                shutil.rmtree(self.tmpDir)
+            else:
+                self.logger.info("Directory for temporarily storing partial input and output already exists. Exiting on user request...")
+                exit(0)
+
+        Path(self.tmpDir).mkdir()
         if self.tmpInputDir != self.InputDir:
             Path(self.tmpInputDir).mkdir()
         Path(self.tmpOutputDir).mkdir()
@@ -434,10 +439,10 @@ class PotreeConverterBatched:
                 exit(0)
 
         Path(self.OutputDir).mkdir()
-        #Path(self.lazHeadersDir).mkdir()
-        #self.logger.info("Copying headers...", color="blue", bold=True)
-        #self.miscCopier.copyFiles(glob.glob(self.lazHeadersToCopy + "/*.json"), self.lazHeadersDir)
-        #self.logger.info("Done copying headers", color="green", bold=True)
+        Path(self.lazHeadersDir).mkdir()
+        self.logger.info("Copying headers...", color="blue", bold=True)
+        self.miscCopier.copyFiles(glob.glob(self.lazHeadersToCopy + "/*.json"), self.lazHeadersDir)
+        self.logger.info("Done copying headers", color="green", bold=True)
         Path(self.tmpOutputDir + "/.counting_copy_done_signals").mkdir()
         Path(self.tmpOutputDir + "/.indexing_copy_done_signals").mkdir()
         Path(self.tmpOutputDir + "/.counting_done_signals").mkdir()
@@ -450,9 +455,9 @@ class PotreeConverterBatched:
 
 
 def PotreeConverterMPIBatchedCopier(potreeConverterBatched):
-    potreeConverterBatched.counting()
 
     lazpartitions = potreeConverterBatched.createPartitions()
+    potreeConverterBatched.counting(lazpartitions)
     potreeConverterBatched.indexing(lazpartitions)
 
     exit(0)
@@ -467,7 +472,7 @@ if __name__ == "__main__":
     configFilePath = sys.argv[1]
     potreeConverterBatched = PotreeConverterBatched(configFilePath)
     potreeConverterBatched.logger.info("Starting PotreeConverterMPI Batched", color="blue", bold=True)
-    potreeConverterBatched.createDirectories()
+    #potreeConverterBatched.createDirectories()
     potreeConverterBatched.scheduler.launchJob()
 
     # PotreeConverterMPIMonitorProcess = Process(target=potreeConverterBatched.scheduler.monitorJob)
