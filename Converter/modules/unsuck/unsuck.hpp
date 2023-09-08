@@ -66,6 +66,8 @@ MemoryData getMemoryData();
 
 CpuData getCpuData();
 
+void setNumProcessors(int num);
+
 void printMemoryReport();
 
 void launchMemoryChecker(int64_t maxMB, double checkInterval);

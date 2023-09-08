@@ -303,7 +303,7 @@ static bool initialized = false;
 static unsigned long long lastTotalUser, lastTotalUserLow, lastTotalSys, lastTotalIdle;
 
 void init() {
-	numProcessors = std::thread::hardware_concurrency();
+	//numProcessors = std::thread::hardware_concurrency();
 	
 	FILE* file = fopen("/proc/stat", "r");
     fscanf(file, "cpu %llu %llu %llu %llu", &lastTotalUser, &lastTotalUserLow, &lastTotalSys, &lastTotalIdle);
@@ -354,6 +354,13 @@ CpuData getCpuData() {
 	data.usage = getCpuUsage();
 
 	return data;
+}
+
+void setNumProcessors(int num) {
+
+    numProcessors = num;
+
+
 }
 
 
