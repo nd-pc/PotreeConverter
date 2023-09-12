@@ -38,8 +38,6 @@ namespace fs = std::filesystem;
 
 namespace chunker_countsort_laszip {
 
-	auto numChunkerThreads = getCpuData().numProcessors;
-	auto numFlushThreads = getCpuData().numProcessors;
 
 	// auto numChunkerThreads = 1;
 	// auto numFlushThreads = 1;
@@ -643,6 +641,7 @@ namespace chunker_countsort_laszip {
 			//cout << ("end: " + formatNumber(dbgCurr)) << endl;
 		};
 
+        auto numChunkerThreads = getCpuData().numProcessors;
 		TaskPool<Task> pool(numChunkerThreads, processor);
 
 		auto tStartTaskAssembly = now();
@@ -778,6 +777,7 @@ namespace chunker_countsort_laszip {
 		state.bytesProcessed = 0;
 		state.duration = 0;
 
+        auto numFlushThreads = getCpuData().numProcessors;
 		writer = new ConcurrentWriter(numFlushThreads, state);
 
 		//printElapsedTime("distributePoints0", tStart);
@@ -1043,7 +1043,7 @@ namespace chunker_countsort_laszip {
 //			}
 
 		};
-
+        auto numChunkerThreads = getCpuData().numProcessors;
 		TaskPool<Task> pool(numChunkerThreads, processor);
 
 		for (auto source: sources) {

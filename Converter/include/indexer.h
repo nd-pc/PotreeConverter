@@ -354,6 +354,7 @@ namespace indexer{
 
         int64_t octreeFileSize = 0;
 
+        int64_t totalChunks = 0;
 
 
 		double scale = 0.001;
@@ -411,9 +412,7 @@ namespace indexer{
 			fChunkRoots.open(chunkRootFile, ios::out | ios::binary);
             string MPIlogFile = targetDir + "/MPISendRcvlog_" + to_string(task_id) + ".txt";
             MPISendRcvlog.open(MPIlogFile, ios::out);
-            for (int i = 0; i < n_tasks - 1; i++){
-                activeTasks.push_back(i + 1);
-            }
+
             //fcrMPIrcv.reserve(n_tasks - 1);
           //  fcrRcvRequest.reserve(n_tasks - 1);
             //fcrRcvStatus.reserve(n_tasks - 1);

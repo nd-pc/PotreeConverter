@@ -208,6 +208,11 @@ namespace indexer {
     }
 
     void Indexer::rcvflushedChunkRoot() {
+
+
+        for (int i = 0; i < n_tasks - 1; i++){
+            activeTasks.push_back(i + 1);
+        }
         /*for (auto i: activeTasks) {
             //fcrMPIrcv[i] = (uint8_t *) calloc(fcrRcvBufferSize, 1);
             //fcrRcvRequest[i] = MPI_REQUEST_NULL;
@@ -570,18 +575,15 @@ namespace indexer {
 
         // mark/flag/insert flushed chunk roots
 
-        int64_t flushedChunkMemUsage = 0;
         for (auto fcr: flushedChunkRoots) {
 
-            flushedChunkMemUsage +=
-                    sizeof(FlushedChunkRoot) + sizeof(Node) + sizeof(CumulativeColor) * fcr.node->colors.size();
+
             auto node = nodesMap[fcr.node->name];
 
             node->fcrs.push_back(fcr);
             node->numPoints += fcr.node->numPoints;
         }
-        cout << "Memory usage of flushed chunk roots: " << (float) flushedChunkMemUsage / (float) 1024 / (float) 1024
-             << " MBytes" << endl;
+
         // recursively merge leaves if sum(points) < threshold
         auto cr_root = nodesMap["r"];
         static int64_t threshold = 5'000'000;
@@ -1959,6 +1961,8 @@ namespace indexer {
 
         indexer.writer->launch();
 
+
+
         auto chunks = getChunks(targetDir);
         auto attributes = chunks->attributes;
         //--------------------MPI-------------------
@@ -2096,7 +2100,7 @@ namespace indexer {
             task->index = tasks.size();
             tasks.push_back(task);
         }
-        cout << "Total number of chunks: " << tasks.size() << endl;
+        indexer.totalChunks += tasks.size();
         int n_chunks = 0;
         for (int i = task_id; i < tasks.size(); i += n_tasks) {
             n_chunks++;
@@ -2112,17 +2116,19 @@ namespace indexer {
         pool.waitTillEmpty();
         pool.close();
 
-        if(islastbatch) {
-            indexer.fChunkRoots.close();
-        }
+
 
         if (task_id != MASTER) {
 
             indexer.sendCRdone();
         }
 
+
+
         cout << "Process " << task_id << " taskpool finished." << endl;
         cout.flush();
+
+
 
         MPI_Bcast(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, MASTER, MPI_COMM_WORLD);
 
@@ -2188,6 +2194,10 @@ namespace indexer {
                 MPI_Send(&indexer.octreeDepth, 1, MPI_INT64_T, MASTER, 30, MPI_COMM_WORLD);
                 indexer.writer->closeAndWait();
             }
+
+            indexer.fChunkRoots.close();
+            cout << "Total chunks processed by process " << task_id << " is " << indexer.totalChunks << endl;
+            cout << "Total chunk roots in the flushChunkRoots vector of task " << task_id << " is " << indexer.flushedChunkRoots.size() << endl;
         }
 
 
@@ -2231,6 +2241,9 @@ namespace indexer {
 
             //string tmpChunkRootsPath = targetDir + "/tmpChunkRoots.bin";
             auto tasks = indexer.processChunkRoots();
+
+
+
 
             for (auto &task: tasks) {
 

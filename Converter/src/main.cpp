@@ -116,8 +116,10 @@ Options parseArguments(int argc, char** argv) {
 	options.keepChunks = keepChunks;
 	options.noChunking = noChunking;
 	options.noIndexing = noIndexing;
-    options.threads = args.get("threads").as<int>(std::thread::hardware_concurrency());
-    setNumProcessors(options.threads);
+    int maxThreads = (int)std::thread::hardware_concurrency();
+    int threads = args.get("threads").as<int>(maxThreads);
+    setNumProcessors(threads);
+
 
 	//cout << "flags: ";
 	//for (string flag : options.flags) {
@@ -787,13 +789,15 @@ int main(int argc, char **argv) {
     auto exePath = fs::canonical(fs::absolute(argv[0])).parent_path().string();
 
     launchMemoryChecker(2 * 1024, 0.1);
-    auto cpuData = getCpuData();
 
-    cout << "#threads: " << cpuData.numProcessors << endl;
+
+
 
     auto options = parseArguments(argc, argv);
 
+    auto cpuData = getCpuData();
 
+    cout << "#threads: " << cpuData.numProcessors << endl;
 
     auto headers = curateHeaders(options.headerDir);
 
