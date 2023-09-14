@@ -379,7 +379,7 @@ namespace indexer{
 
         FlushedChunkRoot fcrWaiting;
 
-        vector<int> activeTasks;
+
         //vector<uint8_t*> fcrMPIrcv;
 
         uint8_t *fcrMPIsend = nullptr;

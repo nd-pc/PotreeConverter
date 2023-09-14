@@ -209,7 +209,7 @@ namespace indexer {
 
     void Indexer::rcvflushedChunkRoot() {
 
-
+        vector<int> activeTasks;
         for (int i = 0; i < n_tasks - 1; i++){
             activeTasks.push_back(i + 1);
         }

@@ -673,7 +673,7 @@ namespace chunker_countsort_laszip {
 
             vector<Source> tmpSources = { source };
             Attributes inputAttributes = computeOutputAttributes(tmpSources, {});
-
+            RECORD_TIMINGS_PARALLEL();
 			while (pointsLeft > 0) {
 
 				int64_t numToRead;
