@@ -2198,6 +2198,14 @@ namespace indexer {
             indexer.fChunkRoots.close();
             cout << "Total chunks processed by process " << task_id << " is " << indexer.totalChunks << endl;
             cout << "Total chunk roots in the flushChunkRoots vector of task " << task_id << " is " << indexer.flushedChunkRoots.size() << endl;
+            if (task_id == MASTER){
+                cout << "The flushed chunkroots receive by MASTER are: " << endl;
+                int i = 0;
+                for(auto fcr: indexer.flushedChunkRoots){
+                    cout << "Flushed chunkroot " << i++ << " is: " << endl;
+                    cout << fcr << endl;
+                }
+            }
         }
 
 
