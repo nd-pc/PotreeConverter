@@ -60,6 +60,7 @@ class LocalCopier(Copier):
                 self.logger.error("Error removing file: " + rmCmdStatus.stderr)
                 exit(1)
 
+
     def copyBatch(self, filesToCopy, size, destination, partition = ""):
         if partition == "":
             partition = str(self.batchCopied)
@@ -70,7 +71,7 @@ class LocalCopier(Copier):
             copyTime = time.time() - startCopyTime
             self.totalCopyTime += copyTime
             self.totalSize += self.storageUtilizationFactor * size
-            self.logger.info("Copied batch-" + str(self.batchCopied) + "/partition-" + partition +  " to " + destination + ", size: "  + str(size) + " bytes, " + "time: " + str(copyTime) + ", copying throughput: " + str((size / copyTime) / (1024**2)) + " MB/s")#: " + ",".join(map(lambda x: Path(x).name, filesToCopy.split())))
+            self.logger.info("Copied batch-" + str(self.batchCopied) + "/partition-" + partition +  " to " + destination + ", size: "  + str(size/(1024**3)) + " gigabytes, " + "time: " + str(copyTime) + ", copying throughput: " + str((size / copyTime) / (1024**2)) + " MB/s")#: " + ",".join(map(lambda x: Path(x).name, filesToCopy.split())))
         self.batchCopied += 1
     def copyFiles(self, filesToCopy, destination):
         subsets = self.filesSubsets(filesToCopy, NAME_MAX, PATH_MAX)
@@ -90,7 +91,7 @@ class LocalCopier(Copier):
         if concatCmdStatus.returncode != 0:
             self.logger.error("Error concatenating files: " + concatCmdStatus.stderr)
             exit(1)
-        self.logger.info("Files: " + ",".join(filesToConcat) + " concatenated to " + destination + ", size:" + str(size) + " bytes, time: " + str(concatTime) + ", concatenating throughput: " + str((size / concatTime) / (1024**2)) + " MB/s")
+        self.logger.info("Files: " + ",".join(filesToConcat) + " concatenated to " + destination + ", size:" + str(size/(1024**3)) + " gigabytes, time: " + str(concatTime) + ", concatenating throughput: " + str((size / concatTime) / (1024**2)) + " MB/s")
 
     def getPartitionNum(self, batchNum):
         return self.batchDict[batchNum]["partition"]

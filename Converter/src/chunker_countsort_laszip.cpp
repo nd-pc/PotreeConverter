@@ -456,7 +456,6 @@ namespace chunker_countsort_laszip {
 
 		auto processor = [gridSize, &grid, tStart, &state, &outputAttributes, monitor](shared_ptr<Task> task){
 
-            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "counting time");
 			string path = task->path;
             //the firstbyte to process
 			int64_t start = task->firstByte;
@@ -512,6 +511,7 @@ namespace chunker_countsort_laszip {
             }
 
             {
+                RECORD_TIMINGS_START(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
                 laszip_POINTER laszip_reader;
                 laszip_header *header;
                 laszip_point *point;
@@ -525,6 +525,9 @@ namespace chunker_countsort_laszip {
                 laszip_get_header_pointer(laszip_reader, &header);
                 laszip_get_point_pointer(laszip_reader, &point);
                 laszip_seek_point(laszip_reader, task->firstPoint);
+
+                RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
+
                 auto attributeHandlers = createAttributeHandlers(header, data, point, inputAttributes,
                                                                  outputAttributesCopy, state);
 
@@ -541,13 +544,21 @@ namespace chunker_countsort_laszip {
                 auto posScale = outputAttributes.posScale;
                 auto posOffset = outputAttributes.posOffset;
 
+
+
                 // for each point determine the cell of the grid it belongs and increment it
                 for (int i = 0; i < numToRead; i++) {
+
                     int64_t pointOffset = i * bpp;
+
+                    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
 
                     laszip_read_point(laszip_reader);
                     laszip_get_coordinates(laszip_reader, coordinates);
 
+                    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
+
+                    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in updating counting grid");
                     {
                         // transfer las integer coordinates to new scale/offset/box values
                         double x = coordinates[0];
@@ -598,10 +609,14 @@ namespace chunker_countsort_laszip {
                         aPosition->max.z = std::max(aPosition->max.z, z);
                     }
 
+                    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in updating counting grid");
+
                     // for each attribute, compute min/max and histogram
+                    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
                     for (auto& handler : attributeHandlers) {
                         handler(pointOffset);
                     }
+                    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
 
                 }
 
@@ -609,6 +624,7 @@ namespace chunker_countsort_laszip {
                 laszip_destroy(laszip_reader);
             }
             // merge attribute metadata of this batch into global attribute metadata
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting for merging attribute metadata of this batch into global attribute metadata")
             for (int i = 0; i < outputAttributesCopy.list.size(); i++) {
                 Attribute& source = outputAttributesCopy.list[i];
                 Attribute& target = outputAttributes.list[i];
@@ -628,6 +644,7 @@ namespace chunker_countsort_laszip {
                     target.histogram[j] = target.histogram[j] + source.histogram[j];
                 }
             }
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting for merging attribute metadata of this batch into global attribute metadata")
 
 			static int64_t pointsProcessed = 0;
 			pointsProcessed += task->numPoints;
@@ -636,7 +653,6 @@ namespace chunker_countsort_laszip {
 			state.pointsProcessed = pointsProcessed;
 			state.duration = now() - tStart;
 
-            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "counting time");
 
 			//cout << ("end: " + formatNumber(dbgCurr)) << endl;
 		};
@@ -646,6 +662,7 @@ namespace chunker_countsort_laszip {
 
 		auto tStartTaskAssembly = now();
 
+        RECORD_TIMINGS_PARALLEL();
 		for (auto source : sources) {
 		//auto parallel = std::execution::par;
 		//for_each(parallel, paths.begin(), paths.end(), [&mtx, &sources](string path) {
@@ -673,7 +690,6 @@ namespace chunker_countsort_laszip {
 
             vector<Source> tmpSources = { source };
             Attributes inputAttributes = computeOutputAttributes(tmpSources, {});
-            RECORD_TIMINGS_PARALLEL();
 			while (pointsLeft > 0) {
 
 				int64_t numToRead;
@@ -1046,6 +1062,7 @@ namespace chunker_countsort_laszip {
         auto numChunkerThreads = getCpuData().numProcessors;
 		TaskPool<Task> pool(numChunkerThreads, processor);
 
+        RECORD_TIMINGS_PARALLEL();
 		for (auto source: sources) {
 
 			laszip_POINTER laszip_reader;
@@ -1399,13 +1416,13 @@ namespace chunker_countsort_laszip {
 
 
 
-            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "counting time");
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total counting time");
             auto tStart = now();
             countPointsInCells(sources, min, max, grid, gridSize,
                                state,
                                outputAttributes, monitor);
             auto duration = now() - tStart;
-            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "counting time");
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total counting time");
             totalFilesCounted += sources.size();
             fstream signalToCopier;
             signalToCopier.open(targetDir + "/.counting_done_signals/batchno_" + to_string(batchNum) + "_counting_done", ios::out);
@@ -1429,7 +1446,7 @@ namespace chunker_countsort_laszip {
         }
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu,  "Total time spent in counting including waiting for copying");
         string metadataPath = targetDir + "/chunks/metadata.json";
-        double cubeSize = (max - min).max();
+        double cubeSize = ceil((max - min).max());
         Vector3 size = { cubeSize, cubeSize, cubeSize };
         max = min + cubeSize;
 

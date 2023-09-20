@@ -269,26 +269,7 @@ namespace indexer{
         int64_t taskID = 0;
 	};
 
-    // Overload the << operator for FlushedChunkRoot
-    std::ostream& operator<<(std::ostream& os, const FlushedChunkRoot& root) {
-        os << "FlushedChunkRoot:" << std::endl;
-        os << "  Offset: " << root.offset << std::endl;
-        os << "  Size: " << root.size << std::endl;
-        os << "  Task ID: " << root.taskID << std::endl;
 
-        if (root.node) {
-            os << "  Node:" << std::endl;
-            os << "    Name: " << root.node->name << std::endl;
-            os << "    Offset: " << root.node->byteOffset << std::endl;
-            os << "    Size: " << root.node->byteSize << std::endl;
-            os << "    Num Points: " << root.node->numPoints << std::endl;
-            os << "    Sampled: " << (root.node->sampled ? "true" : "false") << std::endl;
-        } else {
-            os << "  Node: nullptr" << std::endl;
-        }
-
-        return os;
-    }
 
     struct FlushedChunkRootSerial {
         char name[12];
@@ -412,8 +393,6 @@ namespace indexer{
         //vector<MPI_Request> fcrRcvRequest;
         //vector<MPI_Status> fcrRcvStatus;
         //vector<int> fcrRcvFlag;
-
-
 
 
 

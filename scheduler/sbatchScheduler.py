@@ -41,11 +41,11 @@ class SbatchScheduler(Scheduler):
     def monitorJob(self):
         ST= "PENDING"  # Status to be checked
         self.jobStatus = ST
-        self.logger.info(f"Waiting for {self.programName} sbatch job to start...")
+        self.logger.info(f"Waiting for {self.programName} sbatch job to start...", color="yellow")
         n = 0
         while not ST.startswith("RUNNING"):
             if n == 10:
-                self.logger.info(f"Waiting for {self.programName} sbatch job to start...")
+                self.logger.info(f"Waiting for {self.programName} sbatch job to start...", color="yellow")
                 n = 0
             n += 1
             cmd = shutil.which("sacct") + " -j " + self.jobId + " -o State"
@@ -62,7 +62,7 @@ class SbatchScheduler(Scheduler):
             time.sleep(15)
 
         self.jobStatus = "RUNNING"
-        self.logger.info(f"{self.programName} sbatch job started at " + str(datetime.now()))
+        self.logger.info(f"{self.programName} sbatch job started at " + str(datetime.now()), color="green")
         # Monitoring loop
         while not ST.startswith("COMPLETED"):
             cmd = shutil.which("sacct") + " -j " + self.jobId + " -o State"

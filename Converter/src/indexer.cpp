@@ -510,6 +510,30 @@ namespace indexer {
 
     }
 
+    // Overload the << operator for FlushedChunkRoot
+    std::ostream& operator<<(std::ostream& os, const FlushedChunkRoot& root) {
+        os << "FlushedChunkRoot:" << std::endl;
+        os << "  Offset: " << root.offset << std::endl;
+        os << "  Size: " << root.size << std::endl;
+        os << "  Task ID: " << root.taskID << std::endl;
+
+        if (root.node) {
+            os << "  Node:" << std::endl;
+            os << "    Name: " << root.node->name << std::endl;
+            os << "    Offset: " << root.node->byteOffset << std::endl;
+            os << "    Size: " << root.node->byteSize << std::endl;
+            os << "    Index Start: " << root.node->indexStart << std::endl;
+            os << "    Num Points: " << root.node->numPoints << std::endl;
+            os << "    Sampled: " << (root.node->sampled ? "true" : "false") << std::endl;
+            os << "    Colors: " << root.node->colors.size() << std::endl;
+            os << "    min: " << root.node->min.toString() << std::endl;
+            os << "    max: " << root.node->max.toString() << std::endl;
+        } else {
+            os << "  Node: nullptr" << std::endl;
+        }
+
+        return os;
+    }
 
     void Indexer::flushChunkRoot(shared_ptr<Node> chunkRoot) {
 
@@ -521,6 +545,7 @@ namespace indexer {
 
         fChunkRoots.write(chunkRoot->points->data_char, size);
 
+
         FlushedChunkRoot fcr;
         fcr.node = chunkRoot;
         fcr.offset = offset;
@@ -529,15 +554,17 @@ namespace indexer {
 
         chunkRoot->points = nullptr;
 
+
         if (task_id == MASTER) {
 
             flushedChunkRoots.push_back(fcr);
 
         } else {
+            MPISendRcvlog << "The flushed chunkroots sent to MASTER: " << endl;
+            MPISendRcvlog << fcr << endl;
             sendflushedChunkRoot(fcr);
         }
 
-        //flushedChunkRoots.push_back(fcr);
 
         offset += size;
         mtx_chunkRoot.unlock();
@@ -2056,21 +2083,24 @@ namespace indexer {
 
                                 int64_t numPoints = pointBuffer->size / bpp;
 
+                                RECORD_TIMINGS_START(recordTimings::Machine::cpu, "buildHierarchy time in indexing");
                                 buildHierarchy(&indexer, chunkRoot.get(), pointBuffer, numPoints);
+                                RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "buildHierarchy time in indexing");
 
-                                //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "sampling in indexing time");
+                                RECORD_TIMINGS_START(recordTimings::Machine::cpu, "sampling in indexing time");
 
                                 sampler.sample(chunkRoot.get(), attributes, indexer.spacing, onNodeCompleted,
                                                onNodeDiscarded);
 
-                                //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "sampling in indexing time");
+                                RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "sampling in indexing time");
 
                                 // detach anything below the chunk root. Will be reloaded from
                                 // temporarily flushed hierarchy during creation of the hierarchy file
                                 chunkRoot->children.clear();
 
+                                RECORD_TIMINGS_START(recordTimings::Machine::cpu, "flushChunkRoot time in indexing");
                                 indexer.flushChunkRoot(chunkRoot);
-
+                                RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "flushChunkRoot time in indexing");
                                 // Moved out of the task to enable MPI parallelism.
                                 /*// add chunk root, provided it isn't the root.
                                 if (chunkRoot->name.size() > 1) {
@@ -2090,6 +2120,7 @@ namespace indexer {
             auto task = make_shared<Task>(chunk);
             pool.addTask(task);
         }*/
+        RECORD_TIMINGS_PARALLEL();
         auto tStartIndexing = now();
         vector<shared_ptr<Task>> tasks;
         for (auto chunk: chunks->list) {
@@ -2199,11 +2230,12 @@ namespace indexer {
             cout << "Total chunks processed by process " << task_id << " is " << indexer.totalChunks << endl;
             cout << "Total chunk roots in the flushChunkRoots vector of task " << task_id << " is " << indexer.flushedChunkRoots.size() << endl;
             if (task_id == MASTER){
-                cout << "The flushed chunkroots receive by MASTER are: " << endl;
+                indexer.MPISendRcvlog << "The flushed chunkroots receive by MASTER are: " << endl;
                 int i = 0;
                 for(auto fcr: indexer.flushedChunkRoots){
-                    cout << "Flushed chunkroot " << i++ << " is: " << endl;
-                    cout << fcr << endl;
+                    if (fcr.taskID != MASTER)
+                        indexer.MPISendRcvlog << "Flushed chunkroot " << i++ << " is: " << endl;
+                        indexer.MPISendRcvlog << fcr << endl;
                 }
             }
         }
@@ -2249,8 +2281,6 @@ namespace indexer {
 
             //string tmpChunkRootsPath = targetDir + "/tmpChunkRoots.bin";
             auto tasks = indexer.processChunkRoots();
-
-
 
 
             for (auto &task: tasks) {
@@ -2321,8 +2351,8 @@ namespace indexer {
 
         //delete tmpChunkRoots files
         for (int i = 0; i < n_tasks; i++) {
-            string octreePath = targetDir + "/tmpChunkRoots_" + std::to_string(i) + ".bin";
-            fs::remove(octreePath);
+            string tmpChunkRootsPath = targetDir + "/tmpChunkRoots_" + std::to_string(i) + ".bin";
+            fs::remove(tmpChunkRootsPath);
         }
 
 

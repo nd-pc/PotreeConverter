@@ -858,8 +858,9 @@ int main(int argc, char **argv) {
 
     if(task_id == MASTER) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "The total_ execution time");
 
-
-    if(task_id == MASTER) RECORD_TIMINGS_PRINT(cout);
+    fstream recordTimingsFile;
+    recordTimingsFile.open(targetDir + "/recordTimings" + to_string(task_id) + ".txt", ios::out);
+    /*if(task_id == MASTER)*/ RECORD_TIMINGS_PRINT(recordTimingsFile);
 
     MPI_Finalize();
 

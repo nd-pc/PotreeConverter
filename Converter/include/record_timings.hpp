@@ -301,17 +301,21 @@ using namespace std;
 
         pthread_mutex_lock(&thread_time_record_map_mtx);
         if(thread_time_record_map.contains(thread_id)){
-            thread_time_record_map.at(thread_id).start_timing(t, desc, line_start, file_name);
+            Record_timings &a = thread_time_record_map.at(thread_id);
+            pthread_mutex_unlock(&thread_time_record_map_mtx);
+            a.start_timing(t, desc, line_start, file_name);
         }
         else{
             thread_time_record_map.emplace(thread_id, Record_timings());
-
-            thread_time_record_map.at(thread_id).start_timing(t, desc, line_start, file_name);
+            Record_timings &a = thread_time_record_map.at(thread_id);
+            pthread_mutex_unlock(&thread_time_record_map_mtx);
+            a.start_timing(t, desc, line_start, file_name);
         }
-        pthread_mutex_unlock(&thread_time_record_map_mtx);
+
 
 
     }
+
 
 
     static inline void thread_stop_timing(Machine t, const string &desc, const int line_stop, const string &file_name,
@@ -322,20 +326,26 @@ using namespace std;
         pthread_mutex_lock(&thread_id_map_mtx);
         if (thread_id_map.contains(unique_thread_id)) {
             thread_id = thread_id_map.at(unique_thread_id);
+            pthread_mutex_unlock(&thread_id_map_mtx);
         } else {
-            cerr << "There is no mapping available for system thread id and program thread id, system thread id: " << unique_thread_id << endl;
+            cerr << "There is no mapping available for system thread id and program thread id, system thread id:" <<  unique_thread_id   << ", while exexecuting stop timing in file " << file_name << " at line number " << line_stop << endl;
+            pthread_mutex_unlock(&thread_id_map_mtx);
             exit(EXIT_FAILURE);
         }
-        pthread_mutex_unlock(&thread_id_map_mtx);
+
 
         pthread_mutex_lock(&thread_time_record_map_mtx);
         if(thread_time_record_map.contains(thread_id)){
-            thread_time_record_map.at(thread_id).stop_timing(t, desc, line_stop, file_name);
+            Record_timings &a = thread_time_record_map.at(thread_id);
+            pthread_mutex_unlock(&thread_time_record_map_mtx);
+            a.stop_timing(t, desc, line_stop, file_name);
         }else {
             cerr << "Unable to able to find thread " << thread_id << " record while stop timimg" << endl;
+            pthread_mutex_unlock(&thread_time_record_map_mtx);
             exit(EXIT_FAILURE);
+
         }
-        pthread_mutex_unlock(&thread_time_record_map_mtx);
+
 
     }
 
@@ -457,8 +467,6 @@ using namespace std;
         stream << "\n=========================Record_timings results=================================" << endl;
 
         stream << "Total runtime=" << total_time << " seconds\n";
-
-
 
 
         for(auto& it_desc_map: desc_thread_map){

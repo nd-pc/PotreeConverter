@@ -405,13 +405,13 @@ class PotreeConverterBatched:
             exit(1)
         else:
             pathsCount = 0
-            for path in glob.glob(self.InputDir + "/*.[lL][aA][zZ]"):
-                pathsCount += 1
-                if not Path(self.lazHeadersToCopy + "/" + Path(path).stem + ".json").exists():
-                    self.logger.error("Header file for " + Path(path).name + " does not exist. It should have the same name as the LAZ file with \".json\" extension and be in the " + self.lazHeadersToCopy + " directory")
+            for path in glob.glob(self.lazHeadersToCopy + "/*.[jJ][sS][oO][nN]"):
+                if not glob.glob(self.InputDir + "/" + Path(path).stem + ".[lL][aA][zZ]"):
+                    self.logger.error("LAZ file for " + Path(path).name + " in the input directory" + self.InputDir + " does not exist")
                     exit(1)
+                pathsCount += 1
             if pathsCount == 0:
-                self.logger.error("No LAZ files found in the input directory")
+                self.logger.error("No LAZ files to process in the input directory")
                 exit(1)
 
         if Path(self.tmpDir).exists():

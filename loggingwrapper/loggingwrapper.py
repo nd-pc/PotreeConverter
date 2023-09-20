@@ -42,18 +42,18 @@ class LoggingWrapper:
 
     def info(self, text, color = "",  bold = False):
         if bold:
-            self.logger.info(self.colors(color) + self.BOLD + text + self.ENDC)
+            self.logger.info(self.colors(color) + self.BOLD + text + "\n" + self.ENDC)
         else:
-            self.logger.info(self.colors(color) + text + self.ENDC)
+            self.logger.info(self.colors(color) + text + "\n" + self.ENDC)
 
     def error(self, text, color ="red", bold = False):
         if bold:
-            self.logger.error(self.colors(color)+ self.BOLD + text + self.ENDC)
+            self.logger.error(self.colors(color)+ self.BOLD + text + "\n" + self.ENDC)
         else:
-            self.logger.error(self.colors(color) + text + self.ENDC)
+            self.logger.error(self.colors(color) + text + "\n" + self.ENDC)
 
     def warning(self, text, color = "yellow", bold = False):
         if bold:
-            self.logger.warning(self.colors(color) + self.BOLD + text + self.ENDC)
+            self.logger.warning(self.colors(color) + self.BOLD + text + "\n" + self.ENDC)
         else:
-            self.logger.warning(self.colors(color) + text + self.ENDC)
+            self.logger.warning(self.colors(color) + text + "\n" +  self.ENDC)
