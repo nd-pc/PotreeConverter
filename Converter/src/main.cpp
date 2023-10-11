@@ -100,6 +100,7 @@ Options parseArguments(int argc, char** argv) {
 	bool noChunking = args.has("no-chunking");
 	bool noIndexing = args.has("no-indexing");
 
+
 	Options options;
 	options.outdir = outdir;
     options.headerDir = headerDir;
@@ -423,24 +424,26 @@ shared_ptr<indexer::Chunks> indexing(Options& options, string targetDir, State& 
     }
     string wait = "waiting";
     MPI_Send(wait.c_str(), wait.length(),MPI_CHAR, MASTER, 0, MPI_COMM_WORLD);*/
-    shared_ptr<indexer::Chunks> chunks;
     if (options.method == "random") {
 
         SamplerRandom sampler;
-        chunks = indexer::doIndexing(targetDir, state, options, sampler, indexer, islastbatch);
+        return indexer::doIndexing(targetDir, state, options, sampler, indexer, islastbatch);
 
     } else if (options.method == "poisson") {
 
         SamplerPoisson sampler;
-        chunks = indexer::doIndexing(targetDir, state, options, sampler, indexer, islastbatch);
+        return indexer::doIndexing(targetDir, state, options, sampler, indexer, islastbatch);
 
     } else if (options.method == "poisson_average") {
 
         SamplerPoissonAverage sampler;
-        chunks = indexer::doIndexing(targetDir, state, options, sampler, indexer, islastbatch);
+        return indexer::doIndexing(targetDir, state, options, sampler, indexer, islastbatch);
 
     }
-    return chunks;
+    else {
+        cout << "ERROR: unkown sampling method: " << options.method << endl;
+        exit(123);
+    }
 }
 
 void finalMerge(Options& options, string targetDir, State& state, indexer::Indexer& indexer, shared_ptr<indexer::Chunks> chunks) {
@@ -502,6 +505,7 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
     bool isLastbatch = false;
     indexer::Indexer indexer(targetDir);
     indexer.root = make_shared<Node>("r", stats.min, stats.max);
+
     shared_ptr<indexer::Chunks> chunks;
     if(task_id == MASTER)RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
     if(task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
@@ -748,14 +752,16 @@ void generatePage(string exePath, string pagedir, string pagename) {
 
 #include "HierarchyBuilder.h"
 
-RECORD_TIMINGS_INIT();
+
 
 //map<pid_t, recordTimings::Record_timings> thread_time_record_map;\
 //map<string, vector<pid_t>> desc_thread_map;
 
 int n_tasks, task_id;
 
+RECORD_TIMINGS_INIT();
 int main(int argc, char **argv) {
+
 
     //RECORD_TIMINGS_DISABLE();
     cout << "PotreeConverterMPI started" << endl;
@@ -765,8 +771,6 @@ int main(int argc, char **argv) {
         cout << "MPI does not support MPI_THREAD_SERIALIZED" << endl;
         exit(1);
     }
-
-
     MPI_Comm_size(MPI_COMM_WORLD, &n_tasks);
     MPI_Comm_rank(MPI_COMM_WORLD, &task_id);
     // { // DEBUG STUFF
@@ -782,7 +786,7 @@ int main(int argc, char **argv) {
 
 
 
-    if(task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "The total_ execution time");
+    if(task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "The total_execution time");
 
     double tStart = now();
 
@@ -856,7 +860,7 @@ int main(int argc, char **argv) {
 
 
 
-    if(task_id == MASTER) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "The total_ execution time");
+    if(task_id == MASTER) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "The total_execution time");
 
     fstream recordTimingsFile;
     recordTimingsFile.open(targetDir + "/recordTimings" + to_string(task_id) + ".txt", ios::out);

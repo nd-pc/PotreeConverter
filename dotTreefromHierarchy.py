@@ -11,28 +11,70 @@ TYPE = {
     2: "PROXY",
 }
 
+def print_nodes(file_path, start, size):
+    with open(file_path, "rb") as binary_file:
+        binary_file.seek(start)
+        bytes_read = 0
+        points = 0
+        while bytes_read < size:
+            data = binary_file.read(22)
+            bytes_read += 22
+            if not data:
+                break
+            (node_type, child_mask, numPoints, byteOffset, byteSize) = struct.unpack("<BBIQQ", data)
+            if(node_type != 2):
+                points += numPoints
+                print("node_type", TYPE[node_type], "child_mask", bin(child_mask), "numPoints", numPoints, "byteOffset", byteOffset, "byteSize", byteSize)
+        return points
 
 # Function to read and parse the binary file
 def parse_binary_tree(file_path):
-    nodes = []
-    iter_no = 0
+    #nodes = []
+    proxy_node_list = []
+    total_points = 0
     with open(file_path, "rb") as binary_file:
-        bytses_read = 0
-        while bytses_read < 4488:
+        while True:
             data = binary_file.read(22)
-            bytses_read += 22
             if not data:
                 break
-
-            node_type, child_mask = struct.unpack("BB", data[:2])
+            (node_type, child_mask, numPoints, byteOffset, byteSize) = struct.unpack("<BBIQQ", data)
             if node_type == 2:
-                continue
-            iter_no += 1
-            # indices = bin(child_mask)[2:].zfill(8)
-            indices = [i for i in range(8) if child_mask & (1 << i)]
-            nodes.append((indices, node_type))
+                break
+            total_points += numPoints
+            print("node_type", TYPE[node_type], "child_mask", bin(child_mask), "numPoints", numPoints, "byteOffset", byteOffset, "byteSize", byteSize)
 
-    return nodes
+
+        proxy_node_list.append((node_type, child_mask, numPoints, byteOffset, byteSize))
+        while True:
+            data = binary_file.read(22)
+            if not data:
+                break
+            (node_type, child_mask, numPoints, byteOffset, byteSize) = struct.unpack("<BBIQQ", data)
+            if node_type == 2:
+                proxy_node_list.append((node_type, child_mask, numPoints, byteOffset, byteSize))
+
+    n_proxy_nodes_to_printed = 0
+    for proxy_node in proxy_node_list:
+        total_points += print_nodes(file_path, proxy_node[3], proxy_node[4])
+        n_proxy_nodes_to_printed += 1
+        if n_proxy_nodes_to_printed > 1000:
+            break
+        #print("total points", total_points)
+        # iter = 0
+        # while iter < 100000:
+        #     data = binary_file.read(22)
+        #     if not data:
+        #         break
+        #
+        #     (node_type, child_mask, numPoints, byteOffset, byteSize) = struct.unpack("<BBIQQ", data)
+        #
+        #     print("node_type", TYPE[node_type], "child_mask", bin(child_mask), "numPoints", numPoints, "byteOffset", byteOffset, "byteSize", byteSize)
+        #     iter += 1
+            # indices = bin(child_mask)[2:].zfill(8)
+            #indices = [i for i in range(8) if child_mask & (1 << i)]
+            #nodes.append((indices, node_type))
+
+    #return nodes
 
 
 
@@ -107,9 +149,9 @@ if __name__ == "__main__":
     #parse_hierarchy_bin(input_file)
     parsed_nodes = parse_binary_tree(input_file)
     #pprint.pprint(parsed_nodes)
-    dot_representation = generate_dot_tree(parsed_nodes)
-    tree_file = str(Path(input_file).parent) + "/tree.dot"
-    with open(tree_file, "w") as dot_file:
-        dot_file.write(dot_representation)
+    #dot_representation = generate_dot_tree(parsed_nodes)
+    #tree_file = str(Path(input_file).parent) + "/tree.dot"
+    #with open(tree_file, "w") as dot_file:
+     #   dot_file.write(dot_representation)
 
-    print("DOT representation has been saved to " + tree_file)
+    #print("DOT representation has been saved to " + tree_file)

@@ -53,7 +53,7 @@ using namespace std;
 
     class Record_timings {
     public:
-        Record_timings() {}
+        Record_timings(int tid) : tid(tid) {}
 
 
         void start_timing(Machine t, const string &desc, const int line_start, const string &file_name) {
@@ -214,6 +214,15 @@ using namespace std;
             return timeStamps;
         }
 
+        void clearStackWithWarning() {
+            while (!starts.empty()) {
+                 time_record_all rec = starts.top();
+                 cerr << "WARNING: RECORD_TIMING_START on line no. " << rec.line_start << "for thread " << tid
+                           << " do not match with a RECORD_TIMING_STOP. Ignoring the RECORD_TIMING_START" << endl;
+                 starts.pop();
+            }
+        }
+
     private:
 
         struct time_record_all {
@@ -226,10 +235,11 @@ using namespace std;
         };
         map<string, time_record_to_save> timeStamps;
         stack<time_record_all> starts;
+        int tid;
 
     };
 
-    extern map<pid_t, Record_timings> thread_time_record_map;
+    extern map<pid_t, Record_timings*> thread_time_record_map;
 
     extern map<string, vector<pid_t>> desc_thread_map;
 
@@ -254,6 +264,11 @@ using namespace std;
     }
     static inline void init_multithreading(){
         current_tid = 1;
+        for (auto& it : thread_time_record_map){
+            if (it.first != 0) {
+                it.second->clearStackWithWarning();
+            }
+        }
     }
 
     static inline pid_t get_process_id() {
@@ -299,18 +314,20 @@ using namespace std;
         }
         pthread_mutex_unlock(&desc_thread_map_mtx);
 
+
         pthread_mutex_lock(&thread_time_record_map_mtx);
         if(thread_time_record_map.contains(thread_id)){
-            Record_timings &a = thread_time_record_map.at(thread_id);
+            Record_timings *a = thread_time_record_map.at(thread_id);
             pthread_mutex_unlock(&thread_time_record_map_mtx);
-            a.start_timing(t, desc, line_start, file_name);
+            a->start_timing(t, desc, line_start, file_name);
         }
         else{
-            thread_time_record_map.emplace(thread_id, Record_timings());
-            Record_timings &a = thread_time_record_map.at(thread_id);
+            Record_timings *a = new Record_timings(thread_id);
+            thread_time_record_map.emplace(thread_id, a);
             pthread_mutex_unlock(&thread_time_record_map_mtx);
-            a.start_timing(t, desc, line_start, file_name);
+            a->start_timing(t, desc, line_start, file_name);
         }
+
 
 
 
@@ -336,9 +353,10 @@ using namespace std;
 
         pthread_mutex_lock(&thread_time_record_map_mtx);
         if(thread_time_record_map.contains(thread_id)){
-            Record_timings &a = thread_time_record_map.at(thread_id);
+            Record_timings *a = thread_time_record_map.at(thread_id);
             pthread_mutex_unlock(&thread_time_record_map_mtx);
-            a.stop_timing(t, desc, line_stop, file_name);
+            a->stop_timing(t, desc, line_stop, file_name);
+
         }else {
             cerr << "Unable to able to find thread " << thread_id << " record while stop timimg" << endl;
             pthread_mutex_unlock(&thread_time_record_map_mtx);
@@ -461,6 +479,11 @@ using namespace std;
 
     static inline void thread_print_timing(ostream &stream) {
 
+        for (auto& it : thread_time_record_map){
+            if (it.first != 0) {
+                it.second->clearStackWithWarning();
+            }
+        }
 
         float total_time = get_process_time();
 
@@ -473,15 +496,17 @@ using namespace std;
             float avg_time = 0.0;
             Machine m;
             for (auto& it_record_map : it_desc_map.second) {
-                Record_timings &a = thread_time_record_map.at(it_record_map);
-                avg_time += a.timeStamps_map().at(it_desc_map.first).time_diff/it_desc_map.second.size();
-                m =  a.timeStamps_map().at(it_desc_map.first).t;
+                Record_timings *a = thread_time_record_map.at(it_record_map);
+                avg_time += a->timeStamps_map().at(it_desc_map.first).time_diff/it_desc_map.second.size();
+                m =  a->timeStamps_map().at(it_desc_map.first).t;
             }
             stream << "\tAverage Time spent in \"" << it_desc_map.first << "\" by " << it_desc_map.second.size()   << " threads on "  << (m == Machine::cpu ? "CPU" : "GPU") << "="
                    << avg_time << " ms" << ", which is " <<  (avg_time/(total_time * 1e3))*100 << "% of the total runtime\n";
         }
         stream << "================================================================================" << endl;
-
+        for (auto a : thread_time_record_map) {
+            delete a.second;
+        }
 
     }
 
@@ -493,7 +518,7 @@ using namespace std;
 #define RECORD_TIMINGS_DISABLE() {recordTimings::disable = true;}
 
 #define RECORD_TIMINGS_INIT()\
-    map<pid_t, recordTimings::Record_timings> recordTimings::thread_time_record_map;\
+    map<pid_t, recordTimings::Record_timings*> recordTimings::thread_time_record_map;\
     map<string, vector<pid_t>> recordTimings::desc_thread_map;                      \
     map<pid_t, pid_t> recordTimings::thread_id_map;                     \
     pid_t recordTimings::current_tid = 0; \
@@ -501,6 +526,9 @@ using namespace std;
     pthread_mutex_t recordTimings::desc_thread_map_mtx = PTHREAD_MUTEX_INITIALIZER; \
     pthread_mutex_t recordTimings::thread_id_map_mtx = PTHREAD_MUTEX_INITIALIZER; \
     bool recordTimings::disable = false;
+
+
+
 
 
 #define RECORD_TIMINGS_START(machine, desc_str) \
@@ -518,7 +546,7 @@ using namespace std;
 #define RECORD_TIMINGS_PARALLEL() \
     if (!recordTimings::disable)  \
     {                              \
-        recordTimings::init_multithreading();    \
+        recordTimings::init_multithreading(); \
     }
 
 #define RECORD_TIMINGS_STOP_WITH_FLOPS(machine, desc_str, flops)  \

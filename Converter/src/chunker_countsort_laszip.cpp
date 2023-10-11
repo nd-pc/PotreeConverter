@@ -532,7 +532,7 @@ namespace chunker_countsort_laszip {
                                                                  outputAttributesCopy, state);
 
 
-                double cubeSize = (max - min).max();
+                double cubeSize = ceil((max - min).max());
                 Vector3 size = {cubeSize, cubeSize, cubeSize};
                 max = min + cubeSize;
 
@@ -600,6 +600,8 @@ namespace chunker_countsort_laszip {
 
                         grid[index]++;
 
+
+                        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
                         aPosition->min.x = std::min(aPosition->min.x, x);
                         aPosition->min.y = std::min(aPosition->min.y, y);
                         aPosition->min.z = std::min(aPosition->min.z, z);
@@ -607,6 +609,7 @@ namespace chunker_countsort_laszip {
                         aPosition->max.x = std::max(aPosition->max.x, x);
                         aPosition->max.y = std::max(aPosition->max.y, y);
                         aPosition->max.z = std::max(aPosition->max.z, z);
+                        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
                     }
 
                     RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in updating counting grid");
@@ -920,9 +923,11 @@ namespace chunker_countsort_laszip {
 					}
 
 					// copy other attributes
+                    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in distributing points to compute min/max and histogram");
 					for (auto& handler : attributeHandlers) {
 						handler(offset);
 					}
+                    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in distributing points to compute min/max and histogram");
 
 				}
 
@@ -932,7 +937,7 @@ namespace chunker_countsort_laszip {
 				laszip_destroy(laszip_reader);
 			}
 
-			double cubeSize = (max - min).max();
+			double cubeSize = ceil((max - min).max());
 			Vector3 size = { cubeSize, cubeSize, cubeSize };
 			max = min + cubeSize;
 
