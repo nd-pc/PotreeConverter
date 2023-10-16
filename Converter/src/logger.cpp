@@ -91,12 +91,21 @@ void error(string msg, string file, int line) {
 
 	cout << str << endl;
 
+
 	if (fout != nullptr) {
 		lock_guard<mutex> lock(mtx);
         totalGridErrors++;
 		*fout << str << endl;
 	}
 
+
+
+
+}
+
+
+std::ofstream& getLogFile() {
+        *fout;
 }
 
 }

@@ -474,31 +474,29 @@ void finalMerge(Options& options, string targetDir, State& state, indexer::Index
 void process(Options& options, Stats& stats, State& state, string targetDir, Attributes &outputAttributes, Monitor* monitor) {
 
     chunker_countsort_laszip::NodeLUT lut;
-        if (options.noChunking) {
-            return;
-        }
-        // if is always executed
-        if (options.chunkMethod == "LASZIP") {
+    if (options.noChunking) {
+        return;
+    }
+    // if is always executed
+    if (options.chunkMethod == "LASZIP") {
 
-            if (task_id == MASTER) {
-                lut = chunker_countsort_laszip::doCounting(stats.min, stats.max, state, targetDir, outputAttributes,
-                                                           monitor);
-            }
+        lut = chunker_countsort_laszip::doCounting(stats.min, stats.max, state, targetDir, outputAttributes,
+                                                       monitor);
 
-        } else if (options.chunkMethod == "LAS_CUSTOM") {
+    } else if (options.chunkMethod == "LAS_CUSTOM") {
 
-            //chunker_countsort::doChunking(sources[0].path, targetDir, state);
+        //chunker_countsort::doChunking(sources[0].path, targetDir, state);
 
-        } else if (options.chunkMethod == "SKIP") {
+    } else if (options.chunkMethod == "SKIP") {
 
-            // skip chunking
+        // skip chunking
 
-        } else {
+    } else {
 
-            cout << "ERROR: unkown chunk method: " << options.chunkMethod << endl;
-            exit(123);
+        cout << "ERROR: unkown chunk method: " << options.chunkMethod << endl;
+        exit(123);
 
-        }
+    }
     MPI_Barrier(MPI_COMM_WORLD);
 
     int batchNum = 0;
