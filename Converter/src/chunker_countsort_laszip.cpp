@@ -430,11 +430,13 @@ namespace chunker_countsort_laszip {
     }
 
     // Serialization function for Vector3
-    std::vector<uint8_t> serializeVector3(const Vector3& vec) {
-        std::vector<uint8_t> buffer(sizeof(vec));
-        std::memcpy(buffer.data(), &vec, sizeof(vec));
-        return buffer;
+    void serializeVector3(const Vector3& vec, vector<uint8_t> &buffer) {
+        std::vector<uint8_t> temp(sizeof(vec));
+        std::memcpy(temp.data(), &vec, sizeof(vec));
+        buffer.insert(buffer.end(), temp.begin(), temp.end());
+
     }
+
 
     // Deserialization function for Vector3
     Vector3 deserializeVector3(const std::vector<uint8_t>& buffer) {
@@ -473,10 +475,10 @@ namespace chunker_countsort_laszip {
         buffer.insert(buffer.end(), reinterpret_cast<const uint8_t*>(&attr.type), reinterpret_cast<const uint8_t*>(&attr.type) + sizeof(int));
 
         // Serialize Vector3
-         buffer.insert(buffer.end(), serializeVector3(attr.min).begin(), serializeVector3(attr.min).end());
-         buffer.insert(buffer.end(), serializeVector3(attr.max).begin(), serializeVector3(attr.max).end());
-         buffer.insert(buffer.end(), serializeVector3(attr.scale).begin(), serializeVector3(attr.scale).end());
-         buffer.insert(buffer.end(), serializeVector3(attr.offset).begin(), serializeVector3(attr.offset).end());
+        serializeVector3(attr.min, buffer);
+        serializeVector3(attr.max, buffer);
+        serializeVector3(attr.scale, buffer);
+        serializeVector3(attr.offset, buffer);
 
         // Serialize histogram (assuming histogram is a vector of int64_t)
          int histSize = attr.histogram.size();
@@ -1474,13 +1476,12 @@ namespace chunker_countsort_laszip {
 	}
     // Find global min/max for the attributes
 
+
     void findGlobalAttrMinMax(Attributes& outputAttributes){
 
-        outputAttributes.print(logger::getLogFile());
+        //outputAttributes.print(cout);
         for (int i = 0; i < outputAttributes.list.size(); i++) {
             std::vector<uint8_t> serializedAttribute = serializeAttribute(outputAttributes.list[i]);
-
-
             // Allocate memory for receiving the serialized data from other ranks
             std::vector<uint8_t> receivedData(serializedAttribute.size() * n_tasks);
 
@@ -1541,7 +1542,7 @@ namespace chunker_countsort_laszip {
         bool isLastBatch = false;
         if (task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
         if (task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
-        while (!fs::exists(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
+        while (!fs::exists(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
         MPI_Barrier(MPI_COMM_WORLD);
@@ -1550,11 +1551,11 @@ namespace chunker_countsort_laszip {
         while (!isLastBatch) {
             // cout << "waiting for file" << endl;
             fstream batchfiles;
-            batchfiles.open(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+            batchfiles.open(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
 //            string line2 = "";
 //            while (line2 != "notlastbatch" && line2 != "lastbatch"){
 //                // cout << "waiting for file" << endl
-//                //batchfiles.open(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+//                //batchfiles.open(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
 //                string line1;
 //                getline(batchfiles, line1);
 //                getline(batchfiles, line2);
@@ -1562,7 +1563,7 @@ namespace chunker_countsort_laszip {
 //                //batchfiles.close();
 //                std::this_thread::sleep_for(std::chrono::milliseconds(10));
 //            }
-//            //batchfiles.open(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+//            //batchfiles.open(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
 //            batchfiles.seekg(0, ios::beg);
             string lazFiles;
             getline(batchfiles, lazFiles);
@@ -1584,7 +1585,7 @@ namespace chunker_countsort_laszip {
 
             batchfiles.close();
 
-            //fs::remove(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"));
+            //fs::remove(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"));
 
 
 
@@ -1606,20 +1607,20 @@ namespace chunker_countsort_laszip {
             if (task_id == MASTER) {
                 fstream signalToCopier;
                 signalToCopier.open(
-                        targetDir + "/.counting_done_signals/batchno_" + to_string(batchNum) + "_counting_done",
+                        targetDir + "/counting_done_signals/batchno_" + to_string(batchNum) + "_counting_done",
                         ios::out);
                 signalToCopier << to_string(duration);//<< "\n" << "msgcomplete";
                 signalToCopier.close();
                 {
                     fstream().open(
-                            targetDir + "/.counting_done_signals/batchno_" + to_string(batchNum) + "_counting" +
+                            targetDir + "/counting_done_signals/batchno_" + to_string(batchNum) + "_counting" +
                             "_time_written",
                             ios::out);
                 }
             }
             batchNum++;
             if (task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting")
-            while (!fs::exists(fs::path(targetDir + "/.counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
+            while (!fs::exists(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
                 if (isLastBatch)
                     break;
                 else
@@ -1629,7 +1630,11 @@ namespace chunker_countsort_laszip {
 
         }
         MPI_Barrier(MPI_COMM_WORLD);
+        cout << "Done counting" << endl;
+        flush(cout);
         if (task_id == MASTER) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu,  "Total time spent in counting including waiting for copying");
+        cout << "Summing up counting grids of all MPI processes..." << endl;
+        flush(cout);
         if (task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in summing up the counting grids of all MPI processes");
         // Temporary buffer with compatible data type (int)
         std::vector<int> tempBuffer(grid.size());
@@ -1647,9 +1652,14 @@ namespace chunker_countsort_laszip {
             grid[i].store(tempBuffer[i]);
         }
         if (task_id == MASTER) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total time spent in summing up the counting grids of all MPI processes");
-
+        cout << "Done summing up counting grids of all MPI processes" << endl;
+        flush(cout);
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in finding global min/max for the attributes")
+        cout << "Finding global min/max for the attributes..." << endl;
+        flush(cout);
         findGlobalAttrMinMax(outputAttributes);
+        cout << "Done finding global min/max for the attributes" << endl;
+        flush(cout);
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in finding global min/max for the attributes")
         MPI_Barrier(MPI_COMM_WORLD);
         if(task_id == MASTER) {

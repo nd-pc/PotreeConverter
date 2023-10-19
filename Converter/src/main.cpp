@@ -507,7 +507,7 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
     shared_ptr<indexer::Chunks> chunks;
     if(task_id == MASTER)RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
     if(task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
-    while (!fs::exists(fs::path(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
+    while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
     MPI_Barrier(MPI_COMM_WORLD);
@@ -516,12 +516,12 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
     while (!isLastbatch) {
         // cout << "waiting for file" << endl;
         fstream batchfiles;
-        batchfiles.open(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+        batchfiles.open(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
 //        string line2 = "";
 //
 //        while (line2 != "notlastbatch" && line2 != "lastbatch"){
 //            // cout << "waiting for file" << endl;
-//            //batchfiles.open(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+//            //batchfiles.open(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
 //            string line1;
 //            getline(batchfiles, line1);
 //            getline(batchfiles, line2);
@@ -529,7 +529,7 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
 //            //batchfiles.close();
 //            std::this_thread::sleep_for(std::chrono::milliseconds(10));
 //        }
-//        //batchfiles.open(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
+//        //batchfiles.open(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
 //        batchfiles.seekg(0, ios::beg);
         string lazFiles;
         getline(batchfiles, lazFiles);
@@ -556,13 +556,13 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
 
     }
         if(task_id == MASTER)RECORD_TIMINGS_START (recordTimings::Machine::cpu, "wait time for concatenating octree files");
-        while (!fs::exists(fs::path(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated")) && ((batchNum - 1) >= 0)) {
+        while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated")) && ((batchNum - 1) >= 0)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
         if (task_id == MASTER) RECORD_TIMINGS_STOP (recordTimings::Machine::cpu, "wait time for concatenating octree files");
         MPI_Barrier(MPI_COMM_WORLD);
         if(task_id == MASTER) {
-            //fs::remove(fs::path(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
+            //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
             RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing time");
         }
         auto tStart = now();
@@ -574,22 +574,22 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
 
             if (!isLastbatch) {
                 fstream signalToCopier;
-                signalToCopier.open(targetDir + "/.indexing_done_signals/batchno_" + to_string(batchNum) + "_indexing_done", ios::out);
+                signalToCopier.open(targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum) + "_indexing_done", ios::out);
                 signalToCopier << to_string(duration);// << "\n" << "msgcomplete";
                 signalToCopier.close();
                 {
                     fstream().open(
-                            targetDir + "/.indexing_done_signals/batchno_" + to_string(batchNum) + "_indexing"+ "_time_written",
+                            targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum) + "_indexing"+ "_time_written",
                             ios::out);
                 }
             }
             batchfiles.close();
-            //fs::remove(fs::path(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"));
+            //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"));
         }
         batchNum++;
         if(!isLastbatch)    duration = 0.0;
         if(task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
-        while (!fs::exists(fs::path(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
+        while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
             if (isLastbatch)
                 break;
             else
@@ -608,21 +608,21 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
         finalMerge(options, targetDir, state, indexer, chunks);
         cout << "Final merge done" << endl;
         fstream signalToCopier;
-        signalToCopier.open(targetDir + "/.indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing_done", ios::out);
+        signalToCopier.open(targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing_done", ios::out);
         signalToCopier << to_string(duration);//<< "\n" << "msgcomplete";
         signalToCopier.close();
         {
             fstream().open(
-                    targetDir + "/.indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing"+ "_time_written",
+                    targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing"+ "_time_written",
                     ios::out);
         }
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Final merge time");
         RECORD_TIMINGS_START (recordTimings::Machine::cpu, "wait time for concatenating octree files");
-        while (!fs::exists(fs::path(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated")) && ((batchNum - 1) >= 0)) {
+        while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated")) && ((batchNum - 1) >= 0)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
         RECORD_TIMINGS_STOP (recordTimings::Machine::cpu, "wait time for concatenating octree files");
-        //fs::remove(fs::path(targetDir + "/.indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
+        //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
     }
 
     MPI_Barrier(MPI_COMM_WORLD);

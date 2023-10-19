@@ -241,7 +241,7 @@ class PotreeConverterBatched:
                     filesToCat.append(octree)
                 filesToCat.sort(key=lambda x: int(Path(x).stem.split("_")[1]), reverse=True)
                 self.catFiles(filesToCat, self.OutputDir + "/octree.bin", batchCopier)
-                open(self.tmpOutputDir + "/.indexing_copy_done_signals/batchno_" + str(batchNum) + "_concatenated",
+                open(self.tmpOutputDir + "/indexing_copy_done_signals/batchno_" + str(batchNum) + "_concatenated",
                      "w").close()
 
     def copyBatch(self, filesToCopy, size, destination, batchCopier, signalDir, state, partition=""):
@@ -282,8 +282,8 @@ class PotreeConverterBatched:
                     else:
                         break
 
-                self.copyBatch(filesToCopy, size, self.tmpInputDir, self.countingBatchCopier, self.tmpOutputDir + "/.counting_copy_done_signals", "counting")
-            self.testBatchDone(self.countingBatchCopier, self.tmpOutputDir + "/.counting_done_signals", "counting")
+                self.copyBatch(filesToCopy, size, self.tmpInputDir, self.countingBatchCopier, self.tmpOutputDir + "/counting_copy_done_signals", "counting")
+            self.testBatchDone(self.countingBatchCopier, self.tmpOutputDir + "/counting_done_signals", "counting")
             if not self.countingBatchCopier.isbatchDictEmpty():
                 self.logger.info("Counting pending for batches/partitions: " + ",".join(
                     map(lambda x: str(x) + "/" + str(self.countingBatchCopier.getPartitionNum(x)),
@@ -291,7 +291,7 @@ class PotreeConverterBatched:
                     self.batchesDone["counting"]))
                 time.sleep(60)
         while not self.countingBatchCopier.isbatchDictEmpty():
-            self.testBatchDone(self.countingBatchCopier, self.tmpOutputDir + "/.counting_done_signals", "counting")
+            self.testBatchDone(self.countingBatchCopier, self.tmpOutputDir + "/counting_done_signals", "counting")
 
             if not self.countingBatchCopier.isbatchDictEmpty():
                 self.logger.info("Counting pending for batches/partitions: " + ",".join(
@@ -327,14 +327,14 @@ class PotreeConverterBatched:
                         batchToCopy = lazBatch.copy()
                         self.lazFilestoProcess.remove(lazBatch)
                         self.copyBatch(batchToCopy["files"], batchToCopy["size"], self.tmpInputDir, self.indexingBatchCopier,
-                                       self.tmpOutputDir + "/.indexing_copy_done_signals", "indexing", batchToCopy["id"])
+                                       self.tmpOutputDir + "/indexing_copy_done_signals", "indexing", batchToCopy["id"])
                         if self.indexingBatchCopier.gettotalSize() > self.maxTmpSpaceAvailable:
                             self.logger.warning("Space utilization exceeded in indexing after copying partition " + str(
                                 batchToCopy["id"]) + ". Total space utilization:" + str(
                                     self.indexingBatchCopier.gettotalSize()) + " bytes, Max allowed:" + str(
                                     self.maxTmpSpaceAvailable) + " bytes")
 
-            self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/.indexing_done_signals", "indexing")
+            self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
             if not self.indexingBatchCopier.isbatchDictEmpty():
                 self.logger.info("Indexing pending for batches/partitions: " + ",".join(
                     map(lambda x: str(x) + "/" + str(self.indexingBatchCopier.getPartitionNum(x)),
@@ -344,7 +344,7 @@ class PotreeConverterBatched:
                 time.sleep(60)
 
         while not self.indexingBatchCopier.isbatchDictEmpty():
-            self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/.indexing_done_signals", "indexing")
+            self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
             if not self.indexingBatchCopier.isbatchDictEmpty():
                 self.logger.info("Indexing pending for batches/partitions: " + ",".join(
                     map(lambda x: str(x) + "/" + str(self.indexingBatchCopier.getPartitionNum(x)),
@@ -418,11 +418,12 @@ class PotreeConverterBatched:
             print("Directory for temporarily storing partial input and output already exists. Do you want to overwrite it? (y/n)")
             answer = input()
             if answer == "y" or answer == "Y":
+                self.logger.info("Removing directory for temporarily storing partial input and output...")
                 shutil.rmtree(self.tmpDir)
             else:
                 self.logger.info("Directory for temporarily storing partial input and output already exists. Exiting on user request...")
-                exit(0)
-
+                exit(1)
+        self.logger.info("Creating directory for temporarily storing partial input and output...")
         Path(self.tmpDir).mkdir()
         if self.tmpInputDir != self.InputDir:
             Path(self.tmpInputDir).mkdir()
@@ -432,21 +433,23 @@ class PotreeConverterBatched:
             print("Output directory already exists. Do you want to overwrite it? (y/n)")
             answer = input()
             if answer == "y" or answer == "Y":
+                self.logger.info("Removing output directory...")
                 shutil.rmtree(self.OutputDir)
             else:
                 self.logger.info(
                     "Output directory already exists. Exiting on user request... " )
-                exit(0)
-
+                exit(1)
+        self.logger.info("Creating output directory...")
         Path(self.OutputDir).mkdir()
+        self.logger.info("Creating directory for headers...")
         Path(self.lazHeadersDir).mkdir()
         self.logger.info("Copying headers...", color="blue", bold=True)
         self.miscCopier.copyFiles(glob.glob(self.lazHeadersToCopy + "/*.json"), self.lazHeadersDir)
         self.logger.info("Done copying headers", color="green", bold=True)
-        Path(self.tmpOutputDir + "/.counting_copy_done_signals").mkdir()
-        Path(self.tmpOutputDir + "/.indexing_copy_done_signals").mkdir()
-        Path(self.tmpOutputDir + "/.counting_done_signals").mkdir()
-        Path(self.tmpOutputDir + "/.indexing_done_signals").mkdir()
+        Path(self.tmpOutputDir + "/counting_copy_done_signals").mkdir()
+        Path(self.tmpOutputDir + "/indexing_copy_done_signals").mkdir()
+        Path(self.tmpOutputDir + "/counting_done_signals").mkdir()
+        Path(self.tmpOutputDir + "/indexing_done_signals").mkdir()
         self.logger.info("Done creating directories", color="green", bold=True)
 
     def removeDirectories(self, directories):

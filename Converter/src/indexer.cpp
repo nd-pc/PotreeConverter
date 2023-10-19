@@ -2327,7 +2327,7 @@ namespace indexer {
 
 
 
-        string hierarchyDir = indexer.targetDir + "/.hierarchyChunks";
+        string hierarchyDir = indexer.targetDir + "/hierarchyChunks";
 
         HierarchyBuilder builder(hierarchyDir, hierarchyStepSize);
         builder.build();

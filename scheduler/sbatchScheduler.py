@@ -55,6 +55,7 @@ class SbatchScheduler(Scheduler):
                 exit(1)
             output = process.stdout
             ST = output.split()[-1]
+
             if ST.startswith("CANCELLED"):
                 self.logger.info(f"{self.programName} sbatch job cancelled", color= "red")  # Show humans some info if the job is cancelled
                 self.jobStatus = "KILLED"
@@ -71,7 +72,8 @@ class SbatchScheduler(Scheduler):
                 self.logger.error("Something went wrong in checking the job status")
                 exit(1)
             output = process.stdout
-            ST = output.split()[-1]
+
+            ST = output.split()[2]
 
             time.sleep(15)  # Time interval between checks
 
