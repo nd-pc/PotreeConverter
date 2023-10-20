@@ -894,7 +894,7 @@ namespace chunker_countsort_laszip {
 		return;
 	}
 
-	void addBuckets(string targetDir, vector<shared_ptr<Buffer>>& newBuckets) {
+	void addBuckets(string chunksDir, vector<shared_ptr<Buffer>>& newBuckets) {
 
 		for(int nodeIndex = 0; nodeIndex < nodes.size(); nodeIndex++){
 
@@ -903,7 +903,7 @@ namespace chunker_countsort_laszip {
 			}
 
 			auto& node = nodes[nodeIndex];
-			string path = targetDir + "/chunks/" + node.id + ".bin";
+			string path = chunksDir + "/" + node.id + ".bin";
 			auto buffer = newBuckets[nodeIndex];
 
 			writer->write(path, buffer);
@@ -914,7 +914,7 @@ namespace chunker_countsort_laszip {
 
 
 
-	void distributePoints(vector<Source> sources, Vector3 min, Vector3 max, string targetDir, NodeLUT& lut, State& state, Attributes& outputAttributes, Monitor* monitor) {
+	void distributePoints(vector<Source> sources, Vector3 min, Vector3 max, string chunksDir, NodeLUT& lut, State& state, Attributes& outputAttributes, Monitor* monitor) {
 
 		cout << endl;
 		cout << "=======================================" << endl;
@@ -951,7 +951,7 @@ namespace chunker_countsort_laszip {
 
 		//printElapsedTime("distributePoints1", tStart);
 
-		auto processor = [&mtx_push_point, &counters, targetDir, &state, tStart, &outputAttributes](shared_ptr<Task> task) {
+		auto processor = [&mtx_push_point, &counters, chunksDir, &state, tStart, &outputAttributes](shared_ptr<Task> task) {
 
 			auto path = task->path;
 			auto batchSize = task->batchSize;
@@ -1171,7 +1171,7 @@ namespace chunker_countsort_laszip {
 			state.duration = now() - tStart;
 
 			auto tAddBuckets = now();
-			addBuckets(targetDir, buckets);
+			addBuckets(chunksDir, buckets);
 
 //			// merge attribute metadata of this batch into global attribute metadata
 //			for (int i = 0; i < outputAttributesCopy.list.size(); i++) {
@@ -1198,7 +1198,10 @@ namespace chunker_countsort_laszip {
         auto numChunkerThreads = getCpuData().numProcessors;
 		TaskPool<Task> pool(numChunkerThreads, processor);
 
+
+
         RECORD_TIMINGS_PARALLEL();
+        vector<shared_ptr<Task>> tasks;
 		for (auto source: sources) {
 
 			laszip_POINTER laszip_reader;
@@ -1215,7 +1218,7 @@ namespace chunker_countsort_laszip {
 
 			int64_t numPoints = std::max(uint64_t(header->number_of_point_records), header->extended_number_of_point_records);
 			int64_t pointsLeft = numPoints;
-			int64_t maxBatchSize = 1'000'000;
+			int64_t thread_batchSize = 50'000'000;
 			int64_t numRead = 0;
 
 			vector<Source> tmpSources = { source };
@@ -1224,16 +1227,16 @@ namespace chunker_countsort_laszip {
 			while (pointsLeft > 0) {
 
 				int64_t numToRead;
-				if (pointsLeft < maxBatchSize) {
+				if (pointsLeft < thread_batchSize) {
 					numToRead = pointsLeft;
 					pointsLeft = 0;
 				} else {
-					numToRead = maxBatchSize;
-					pointsLeft = pointsLeft - maxBatchSize;
+					numToRead = thread_batchSize;
+					pointsLeft = pointsLeft - thread_batchSize;
 				}
 
 				auto task = make_shared<Task>();
-				task->maxBatchSize = maxBatchSize;
+				task->maxBatchSize = thread_batchSize;
 				task->batchSize = numToRead;
 				task->lut = &lut;
 				task->firstPoint = numRead;
@@ -1245,7 +1248,7 @@ namespace chunker_countsort_laszip {
 				task->max = max;
 				task->inputAttributes = inputAttributes;
 
-				pool.addTask(task);
+				//pool.addTask(task);
 
 				numRead += numToRead;
 			}
@@ -1254,6 +1257,18 @@ namespace chunker_countsort_laszip {
 			laszip_destroy(laszip_reader);
 
 		}
+
+        auto parallel = std::execution::par_unseq;
+        sort(parallel, tasks.begin(), tasks.end(),
+             [](shared_ptr<Task> a, shared_ptr<Task> b) { return a->batchSize > b->batchSize; });
+
+        for (int i = task_id; i < tasks.size(); i += n_tasks) {
+            pool.addTask(tasks[i]);
+        }
+
+        //printElapsedTime("tStartTaskAssembly", tStartTaskAssembly);
+
+        pool.waitTillEmpty();
 
 		pool.close();
 		writer->join();
@@ -1661,14 +1676,13 @@ namespace chunker_countsort_laszip {
         cout << "Done finding global min/max for the attributes" << endl;
         flush(cout);
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in finding global min/max for the attributes")
-        MPI_Barrier(MPI_COMM_WORLD);
-        if(task_id == MASTER) {
-            string metadataPath = targetDir + "/chunks/metadata.json";
-            double cubeSize = ceil((max - min).max());
-            Vector3 size = {cubeSize, cubeSize, cubeSize};
-            max = min + cubeSize;
-            writeMetadata(metadataPath, min, max, outputAttributes);
-        }
+        //MPI_Barrier(MPI_COMM_WORLD);
+
+        string metadataPath = targetDir + "/chunks_" + to_string(task_id) + "/metadata.json";
+        double cubeSize = ceil((max - min).max());
+        Vector3 size = {cubeSize, cubeSize, cubeSize};
+        max = min + cubeSize;
+        writeMetadata(metadataPath, min, max, outputAttributes);
 
         // MERGE: this function merges cells in a grid of gridSize x gridSize x gridSize
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "merge time");
@@ -1686,10 +1700,10 @@ namespace chunker_countsort_laszip {
     }
 
 
-     void doDistribution(Vector3 min, Vector3 max, State& state, NodeLUT lut, string targetDir, vector<Source> sources, Attributes &outputAttributes, Monitor* monitor) {
+     void doDistribution(Vector3 min, Vector3 max, State& state, NodeLUT lut, string chunksDir, vector<Source> sources, Attributes &outputAttributes, Monitor* monitor) {
 			state.currentPass = 2;
             RECORD_TIMINGS_START(recordTimings::Machine::cpu, "distribution time");
-			distributePoints(sources, min, max, targetDir, lut, state, outputAttributes, monitor);
+			distributePoints(sources, min, max, chunksDir, lut, state, outputAttributes, monitor);
             RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "distribution time");
 
 	}

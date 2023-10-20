@@ -52,8 +52,9 @@ namespace indexer {
         return mask;
     }
 
-    shared_ptr<Chunks> getChunks(string pathIn) {
-        string chunkDirectory = pathIn + "/chunks";
+    shared_ptr<Chunks> getChunks(string chunkDirectory,  shared_ptr<map<string, vector<string>>> chunkFiletoPathMap) {
+        //string chunkDirectory = pathIn + "/chunks";
+        //string chunkDirectory = pathIn + "/chunks";
 
         string metadataText = readTextFile(chunkDirectory + "/metadata.json");
         json js = json::parse(metadataText);
@@ -69,7 +70,6 @@ namespace indexer {
                 js["max"][1].get<double>(),
                 js["max"][2].get<double>()
         };
-
 
 
         vector<Attribute> attributeList;
@@ -150,39 +150,42 @@ namespace indexer {
         };
 
         vector<shared_ptr<Chunk>> chunksToLoad;
-        for (const auto &entry: fs::directory_iterator(chunkDirectory)) {
-            string filename = entry.path().filename().string();
-            string chunkID = toID(filename);
-
-            if (!iEndsWith(filename, ".bin")) {
-                continue;
-            }
-
+        for (auto const &[key, paths]: *chunkFiletoPathMap) {
+            //cout << key << " : " << val << endl;
+            //for (const auto &entry: fs::directory_iterator(chunkDirectory)) {
             shared_ptr<Chunk> chunk = make_shared<Chunk>();
-            chunk->file = entry.path().string();
-            chunk->id = chunkID;
-            chunk->numPoints = file_size(entry.path()) / attributes.bytes;
+            for (auto const &entry: paths) {
+                string filename = fs::path(entry).filename().string();
+                string chunkID = toID(filename);
 
-            BoundingBox box = {min, max};
+                if (!iEndsWith(filename, ".bin")) {
+                    continue;
+                }
 
-            for (int i = 1; i < chunkID.size(); i++) {
-                int index = chunkID[i] - '0'; // this feels so wrong...
 
-                box = childBoundingBoxOf(box.min, box.max, index);
+                chunk->files.push_back(entry);
+                chunk->id = chunkID;
+                chunk->numPoints += file_size(fs::path(entry)) / attributes.bytes;
+
+                BoundingBox box = {min, max};
+
+                for (int i = 1; i < chunkID.size(); i++) {
+                    int index = chunkID[i] - '0'; // this feels so wrong...
+
+                    box = childBoundingBoxOf(box.min, box.max, index);
+                }
+
+                chunk->min = box.min;
+                chunk->max = box.max;
             }
-
-            chunk->min = box.min;
-            chunk->max = box.max;
-
             chunksToLoad.push_back(chunk);
+
+            auto chunks = make_shared<Chunks>(chunksToLoad, min, max);
+            chunks->attributes = attributes;
+
+
+            return chunks;
         }
-
-
-        auto chunks = make_shared<Chunks>(chunksToLoad, min, max);
-        chunks->attributes = attributes;
-
-
-        return chunks;
     }
 
     void Indexer::sendCRdone() {
@@ -1972,7 +1975,7 @@ namespace indexer {
     }
 
 
-    shared_ptr<Chunks> doIndexing(string targetDir, State &state, Options &options,  Sampler &sampler, Indexer &indexer, bool islastbatch) {
+    shared_ptr<Chunks> doIndexing(string chunksDir, State &state, Options &options,  Sampler &sampler, Indexer &indexer, bool islastbatch, shared_ptr<map<string, vector<string>>> chunkFiletoPathMap) {
 
         cout << endl;
         cout << "=======================================" << endl;
@@ -1990,7 +1993,8 @@ namespace indexer {
 
 
 
-        auto chunks = getChunks(targetDir);
+        auto chunks = getChunks(chunksDir, chunkFiletoPathMap);
+
         auto attributes = chunks->attributes;
         //--------------------MPI-------------------
         // sort the chunks in increasing order to distribute to multiple tasks
@@ -2024,7 +2028,10 @@ namespace indexer {
         int64_t totalPoints = 0;
         int64_t totalBytes = 0;
         for (auto chunk: chunks->list) {
-            auto filesize = fs::file_size(chunk->file);
+            int64_t filesize = 0;
+            for (auto file : chunk->files) {
+                filesize += fs::file_size(file);
+            }
             totalPoints += filesize / attributes.bytes;
             totalBytes += filesize;
             // add chunk root, provided it isn't the root.
@@ -2061,7 +2068,10 @@ namespace indexer {
                                 indexer.waitUntilWriterBacklogBelow(1'000);
                                 activeThreads++;
 
-                                auto filesize = fs::file_size(chunk->file);
+                                int64_t filesize = 0;
+                                for (auto file : chunk->files) {
+                                    filesize += fs::file_size(file);
+                                }
 
                                 stringstream msg;
                                 msg << "start indexing chunk " + chunk->id << "\n";
@@ -2071,15 +2081,15 @@ namespace indexer {
                                 logger::INFO(msg.str());
 
                                 indexer.bytesInMemory += filesize;
-                                vector<string> files;
-                                files.push_back(chunk->file);
-                                auto pointBuffer = readBinaryFile(files);
+                                auto pointBuffer = readBinaryFile(chunk->files);
 
                                 auto tStartChunking = now();
 
-                                /*if (!options.keepChunks) {
-                                    fs::remove(chunk->file);
-                                }*/
+                                if (!options.keepChunks) {
+                                    for (auto file : chunk->files) {
+                                        fs::remove(file);
+                                    }
+                                }
 
                                 int64_t numPoints = pointBuffer->size / bpp;
 
@@ -2244,19 +2254,19 @@ namespace indexer {
 
         printElapsedTime("Indexing completed by process " + std::to_string(task_id) + " in", tStartIndexing);
 
-            if (!options.keepChunks) {
-                /*for (int i = task_id; i < tasks.size(); i += n_tasks) {
-                    fs::remove(tasks[i]->chunk->file);
-                }*/
-                auto removeFile = [](shared_ptr<Task> task) {
-                    if ( task->index % n_tasks == task_id) {
-                        fs::remove(task->chunk->file);
-                    }
-                };
-
-// Use std::for_each with std::execution::par to parallelize the operation.
-                std::for_each(std::execution::par, tasks.begin(), tasks.end(), removeFile);
-            }
+//            if (!options.keepChunks) {
+//                /*for (int i = task_id; i < tasks.size(); i += n_tasks) {
+//                    fs::remove(tasks[i]->chunk->file);
+//                }*/
+////                auto removeFile = [](shared_ptr<Task> task) {
+////                    if ( task->index % n_tasks == task_id) {
+////                        fs::remove(task->chunk->file);
+////                    }
+////                };
+//
+//// Use std::for_each with std::execution::par to parallelize the operation.
+//                std::for_each(std::execution::par, tasks.begin(), tasks.end(), removeFile);
+//            }
 
 
 
@@ -2341,13 +2351,14 @@ namespace indexer {
         string metadata = indexer.createMetadata(options, state, hierarchy);
         writeFile(metadataPath, metadata);
 
+       for (int i = 0 ; i < n_tasks; i++) {
+            string chunksMetadataPath = targetDir + "/chunks_" + std::to_string(i) + "/metadata.json";
 
-        string chunksMetadataPath = targetDir + "/chunks/metadata.json";
-
-        fs::remove(chunksMetadataPath);//string hierarchyPath = targetDir + "/hierarchy.bin";
+            fs::remove(chunksMetadataPath);//string hierarchyPath = targetDir + "/hierarchy.bin";
 
         // remove chunks directory
-        fs::remove(targetDir + "/chunks");
+            fs::remove(targetDir + "/chunks_" + std::to_string(i));
+       }
 
         //delete tmpChunkRoots files
         for (int i = 0; i < n_tasks; i++) {

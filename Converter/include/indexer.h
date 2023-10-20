@@ -15,6 +15,7 @@
 #include <chrono>
 #include <mutex>
 #include <condition_variable>
+#include <map>
 
 #include "json/json.hpp"
 
@@ -63,10 +64,10 @@ namespace indexer{
 		Vector3 min;
 		Vector3 max;
 
-		string file;
+		vector<string> files;
 		string id;
         //-----------------MPI---------------------
-        int64_t numPoints; // Total numPoints in the chunk
+        int64_t numPoints = 0; // Total numPoints in the chunk
         //--------------MPI--------------------------
 	};
 
@@ -462,7 +463,7 @@ namespace indexer{
 		string do_grouping() const { return "\3"; }
 	};
 
-	shared_ptr<Chunks> doIndexing(string targetDir, State& state, Options& options, Sampler& sampler, Indexer &indexer, bool islastbatch);
+	shared_ptr<Chunks> doIndexing(string chunksDir, State& state, Options& options, Sampler& sampler, Indexer &indexer, bool islastbatch, shared_ptr<std::map<string, vector<string>>> chunkFiletoPathMap);
     void doFinalMerge(Indexer &indexer, shared_ptr<Chunks> chunks, string targetDir, Sampler &sampler, Options &options,
                       State &state);
 

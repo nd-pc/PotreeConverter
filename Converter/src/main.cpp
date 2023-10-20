@@ -413,7 +413,7 @@ Stats computeStats(vector<Source> headers) {
 
 // 	return monitor;
 // }
-shared_ptr<indexer::Chunks> indexing(Options& options, string targetDir, State& state, indexer::Indexer& indexer, bool islastbatch) {
+shared_ptr<indexer::Chunks> indexing(Options& options, string chunksDir, State& state, indexer::Indexer& indexer, bool islastbatch, shared_ptr<map<string, vector<string>>> chunkFiletoPathMap) {
 
     if (options.noIndexing) {
         return nullptr;
@@ -427,17 +427,17 @@ shared_ptr<indexer::Chunks> indexing(Options& options, string targetDir, State& 
     if (options.method == "random") {
 
         SamplerRandom sampler;
-        return indexer::doIndexing(targetDir, state, options, sampler, indexer, islastbatch);
+        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch, chunkFiletoPathMap);
 
     } else if (options.method == "poisson") {
 
         SamplerPoisson sampler;
-        return indexer::doIndexing(targetDir, state, options, sampler, indexer, islastbatch);
+        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch, chunkFiletoPathMap);
 
     } else if (options.method == "poisson_average") {
 
         SamplerPoissonAverage sampler;
-        return indexer::doIndexing(targetDir, state, options, sampler, indexer, islastbatch);
+        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch, chunkFiletoPathMap);
 
     }
     else {
@@ -470,6 +470,21 @@ void finalMerge(Options& options, string targetDir, State& state, indexer::Index
         doFinalMerge(indexer, chunks, targetDir, sampler, options, state);
 
     }
+}
+
+shared_ptr<map<string, vector<string>>> mapChunkstoPaths(string targetDir){
+    shared_ptr<map<string, vector<string>>> chunkFiletoPathMap = make_shared<map<string, vector<string>>>();
+    for (int i = 0; i < n_tasks; i++) {
+        for (auto& entry : fs::directory_iterator(targetDir + "/" + "chunks_" + to_string(i))) {
+            auto filepath = entry.path();
+            if (iEndsWith(filepath.string(), ".bin")) {
+                (*chunkFiletoPathMap)[filepath.filename().string()].push_back(filepath.string());
+            }
+        }
+    }
+    return chunkFiletoPathMap;
+
+
 }
 void process(Options& options, Stats& stats, State& state, string targetDir, Attributes &outputAttributes, Monitor* monitor) {
 
@@ -544,32 +559,38 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
             cout << "ERROR: unkown batch type: " << lastbatch << endl;
             exit(123);
         }
-        if (task_id == MASTER) {
-            auto sources = curateSources(lazFilesVec);
-            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Distribution time");
-            auto tStart = now();
-            chunker_countsort_laszip::doDistribution(stats.min, stats.max, state, lut, targetDir, sources,
-                                                     outputAttributes, monitor);
-            duration += now() - tStart;
-            logger::INFO("Grid errors in distribution till now: " + to_string(logger::totalGridErrors));
-            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Distribution time");
 
-    }
+        auto sources = curateSources(lazFilesVec);
+
+         if (task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Distribution time");
+        auto tStartDist = now();
+        chunker_countsort_laszip::doDistribution(stats.min, stats.max, state, lut, targetDir + "/chunks_" + to_string(task_id), sources,
+                                                 outputAttributes, monitor);
+        duration += now() - tStartDist;
+        logger::INFO("Grid errors in distribution till now: " + to_string(logger::totalGridErrors));
+        if (task_id == MASTER)  RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Distribution time");
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        shared_ptr<map<string, vector<string>>> chunkFiletoPathMap = mapChunkstoPaths(targetDir);
+        MPI_Barrier(MPI_COMM_WORLD);
+
         if(task_id == MASTER)RECORD_TIMINGS_START (recordTimings::Machine::cpu, "wait time for concatenating octree files");
         while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated")) && ((batchNum - 1) >= 0)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
         if (task_id == MASTER) RECORD_TIMINGS_STOP (recordTimings::Machine::cpu, "wait time for concatenating octree files");
         MPI_Barrier(MPI_COMM_WORLD);
+
         if(task_id == MASTER) {
             //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
             RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing time");
         }
-        auto tStart = now();
-        chunks = indexing(options, targetDir, state, indexer, isLastbatch);
-        duration += now() - tStart;
+        auto tStartIndex = now();
+        chunks = indexing(options, targetDir + "/chunks_" + to_string(task_id), state, indexer, isLastbatch, chunkFiletoPathMap);
+        duration += now() - tStartIndex;
         if(task_id == MASTER) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Indexing time");
         MPI_Barrier(MPI_COMM_WORLD);
+
         if(task_id == MASTER) {
 
             if (!isLastbatch) {
@@ -821,14 +842,9 @@ int main(int argc, char **argv) {
     }
     cout << "target directory: '" << targetDir << "'" << endl;
 
+    if (task_id == MASTER) fs::create_directories(targetDir + "/hierarchyChunks");
+    fs::create_directories(targetDir + "/chunks_" + to_string(task_id));
 
-    if (task_id == MASTER) {
-        //fs::remove_all(targetDir);
-        //fs::create_directories(targetDir);
-        fs::create_directories(targetDir + "/chunks");
-        //fs::create_directories(targetDir + "/.hierarchyChunks");
-
-    }
     string logFile = targetDir + "/log_" + to_string(task_id) + ".txt";
     logger::addOutputFile(logFile);
 
