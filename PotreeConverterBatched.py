@@ -119,7 +119,7 @@ class PotreeConverterBatched:
 
         if self.copierType == "local":
              self.countingBatchCopier = LocalCopier(self.logger)
-             self.indexingBatchCopier = LocalCopier(self.logger, self.lazCompressionRatio)
+             self.indexingBatchCopier = LocalCopier(self.logger)
              self.miscCopier = LocalCopier(self.logger)
         else:
             self.logger.error("Copier type not recognized")
@@ -287,7 +287,7 @@ class PotreeConverterBatched:
             if not self.countingBatchCopier.isbatchDictEmpty():
                 self.logger.info("Counting pending for batches/partitions: " + ",".join(
                     map(lambda x: str(x) + "/" + str(self.countingBatchCopier.getPartitionNum(x)),
-                        self.countingBatchCopier.getCopiedBatchesKeys())) + ". Done batches/partitions: " + ",".join(
+                        self.countingBatchCopier.getCopiedBatchNums())) + ". Done batches/partitions: " + ",".join(
                     self.batchesDone["counting"]))
                 time.sleep(60)
         while not self.countingBatchCopier.isbatchDictEmpty():
@@ -296,7 +296,7 @@ class PotreeConverterBatched:
             if not self.countingBatchCopier.isbatchDictEmpty():
                 self.logger.info("Counting pending for batches/partitions: " + ",".join(
                     map(lambda x: str(x) + "/" + str(self.countingBatchCopier.getPartitionNum(x)),
-                        self.countingBatchCopier.getCopiedBatchesKeys())) + ". Done batches/partitions: " + ",".join(
+                        self.countingBatchCopier.getCopiedBatchNums())) + ". Done batches/partitions: " + ",".join(
                     self.batchesDone["counting"]))
                 time.sleep(60)
 
@@ -314,7 +314,12 @@ class PotreeConverterBatched:
         numBatches = 0
         totalBatches = len(self.lazFilestoProcess)
         while self.lazFilestoProcess:  # loop until all files are copied
-            if self.indexingBatchCopier.gettotalSize() < self.maxTmpSpaceAvailable:
+            if not self.indexingBatchCopier.getCopiedBatchNums():
+                nextBatchSize = 0
+            else:
+                nextBatchSize = self.indexingBatchCopier.getBatchSize(min(self.indexingBatchCopier.getCopiedBatchNums()))
+            if ((nextBatchSize*self.lazCompressionRatio) + (self.indexingBatchCopier.gettotalSize() - self.indexingBatchCopier.getMaxBatchSize())) <= self.maxTmpSpaceAvailable:
+            #if self.indexingBatchCopier.gettotalSize() < self.maxTmpSpaceAvailable:
                 currbatches = batches.copy()
                 for lazBatch in currbatches:
                     if lazBatch["status"] == "skip":
@@ -338,7 +343,7 @@ class PotreeConverterBatched:
             if not self.indexingBatchCopier.isbatchDictEmpty():
                 self.logger.info("Indexing pending for batches/partitions: " + ",".join(
                     map(lambda x: str(x) + "/" + str(self.indexingBatchCopier.getPartitionNum(x)),
-                        self.indexingBatchCopier.getCopiedBatchesKeys())) + ". Skipped partitions :" + ",".join(
+                        self.indexingBatchCopier.getCopiedBatchNums())) + ". Skipped partitions :" + ",".join(
                     map(lambda x: str(x["id"]), skipPartitions)) + ". Done batches/partitions: " + ",".join(
                     self.batchesDone["indexing"]))
                 time.sleep(60)
@@ -348,7 +353,7 @@ class PotreeConverterBatched:
             if not self.indexingBatchCopier.isbatchDictEmpty():
                 self.logger.info("Indexing pending for batches/partitions: " + ",".join(
                     map(lambda x: str(x) + "/" + str(self.indexingBatchCopier.getPartitionNum(x)),
-                        self.indexingBatchCopier.getCopiedBatchesKeys())) + ". Skipped partitions:" + ",".join(
+                        self.indexingBatchCopier.getCopiedBatchNums())) + ". Skipped partitions:" + ",".join(
                     map(lambda x: str(x["id"]), skipPartitions)) + ". Done batches/partitions: " + ",".join(
                     indexingDone))
                 time.sleep(60)
@@ -398,16 +403,16 @@ class PotreeConverterBatched:
 
         self.logger.info("Creating directories...", color="blue", bold=True)
         if not Path(self.InputDir).exists():
-            self.logger.error("Input directory  does not exist")
+            self.logger.error("Input directory " + self.InputDir + " does not exist")
             exit(1)
         elif not Path(self.lazHeadersToCopy).exists():
-            self.logger.error("Headers directory for input data does not exist")
+            self.logger.error("Headers directory " + self.lazHeadersToCopy + " does not exist")
             exit(1)
         else:
             pathsCount = 0
             for path in glob.glob(self.lazHeadersToCopy + "/*.[jJ][sS][oO][nN]"):
                 if not glob.glob(self.InputDir + "/" + Path(path).stem + ".[lL][aA][zZ]"):
-                    self.logger.error("LAZ file for " + Path(path).name + " in the input directory" + self.InputDir + " does not exist")
+                    self.logger.error("LAZ file for " + Path(path).name + " in the input directory " + self.InputDir + " does not exist")
                     exit(1)
                 pathsCount += 1
             if pathsCount == 0:
@@ -415,33 +420,33 @@ class PotreeConverterBatched:
                 exit(1)
 
         if Path(self.tmpDir).exists():
-            print("Directory for temporarily storing partial input and output already exists. Do you want to overwrite it? (y/n)")
+            print("Directory "  + self.tmpDir  + " for temporarily storing partial input and output already exists. Do you want to overwrite it? (y/n)")
             answer = input()
             if answer == "y" or answer == "Y":
-                self.logger.info("Removing directory for temporarily storing partial input and output...")
+                self.logger.info("Removing directory " + self.tmpDir + " for temporarily storing partial input and output...")
                 shutil.rmtree(self.tmpDir)
             else:
-                self.logger.info("Directory for temporarily storing partial input and output already exists. Exiting on user request...")
+                self.logger.info("Directory " + self.tmpDir + " for temporarily storing partial input and output already exists. Exiting on user request... ")
                 exit(1)
-        self.logger.info("Creating directory for temporarily storing partial input and output...")
+        self.logger.info("Creating directory " + self.tmpDir + " for temporarily storing partial input and output...")
         Path(self.tmpDir).mkdir()
         if self.tmpInputDir != self.InputDir:
             Path(self.tmpInputDir).mkdir()
         Path(self.tmpOutputDir).mkdir()
 
         if Path(self.OutputDir).exists():
-            print("Output directory already exists. Do you want to overwrite it? (y/n)")
+            print("Output directory " + self.OutputDir + " already exists. Do you want to overwrite it? (y/n)")
             answer = input()
             if answer == "y" or answer == "Y":
-                self.logger.info("Removing output directory...")
+                self.logger.info("Removing output directory " + self.OutputDir + "...")
                 shutil.rmtree(self.OutputDir)
             else:
                 self.logger.info(
-                    "Output directory already exists. Exiting on user request... " )
+                    "Output directory " + self.OutputDir + " already exists. Exiting on user request... ")
                 exit(1)
-        self.logger.info("Creating output directory...")
+        self.logger.info("Creating output directory " + self.OutputDir + "...")
         Path(self.OutputDir).mkdir()
-        self.logger.info("Creating directory for headers...")
+        self.logger.info("Creating directory " + self.lazHeadersDir + " for temporarily storing headers...")
         Path(self.lazHeadersDir).mkdir()
         self.logger.info("Copying headers...", color="blue", bold=True)
         self.miscCopier.copyFiles(glob.glob(self.lazHeadersToCopy + "/*.json"), self.lazHeadersDir)

@@ -782,7 +782,7 @@ RECORD_TIMINGS_INIT();
 int main(int argc, char **argv) {
 
 
-    //RECORD_TIMINGS_DISABLE();
+    RECORD_TIMINGS_DISABLE();
     cout << "PotreeConverterMPI started" << endl;
     int provided;
     MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &provided);

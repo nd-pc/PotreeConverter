@@ -180,12 +180,11 @@ namespace indexer {
             }
             chunksToLoad.push_back(chunk);
 
-            auto chunks = make_shared<Chunks>(chunksToLoad, min, max);
-            chunks->attributes = attributes;
 
-
-            return chunks;
         }
+        auto chunks = make_shared<Chunks>(chunksToLoad, min, max);
+        chunks->attributes = attributes;
+        return chunks;
     }
 
     void Indexer::sendCRdone() {
@@ -1991,9 +1990,8 @@ namespace indexer {
 
         indexer.writer->launch();
 
-
-
         auto chunks = getChunks(chunksDir, chunkFiletoPathMap);
+        MPI_Barrier(MPI_COMM_WORLD);
 
         auto attributes = chunks->attributes;
         //--------------------MPI-------------------
@@ -2080,9 +2078,11 @@ namespace indexer {
                                 msg << "max: " << chunk->max.toString();
                                 logger::INFO(msg.str());
 
-                                indexer.bytesInMemory += filesize;
-                                auto pointBuffer = readBinaryFile(chunk->files);
 
+                                indexer.bytesInMemory += filesize;
+                                RECORD_TIMINGS_START(recordTimings::Machine::cpu, "readBinaryFile time in indexing");
+                                auto pointBuffer = readBinaryFile(chunk->files);
+                                RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "readBinaryFile time in indexing");
                                 auto tStartChunking = now();
 
                                 if (!options.keepChunks) {

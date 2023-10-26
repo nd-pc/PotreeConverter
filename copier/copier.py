@@ -29,7 +29,7 @@ class Copier:
         return self.totalSize
     def setTotalSize(self, size):
         self.totalSize = size
-    def getCopiedBatchesKeys(self):
+    def getCopiedBatchNums(self):
         return self.batchDict.keys()
     def isbatchDictEmpty(self):
         if len(self.batchDict) == 0:
@@ -38,7 +38,24 @@ class Copier:
             return False
     def getTotalCopyTime(self):
         return self.totalCopyTime
+
     def getPartitionNum(self, batchNum):
-        raise NotImplementedError("Subclass must implement abstract method")
+        if batchNum not in self.batchDict:
+            self.logger.error("Error: batch number " + str(batchNum) + " does not exist")
+            exit(1)
+        return self.batchDict[batchNum]["partition"]
     def getFiles(self, batchNum):
-        raise NotImplementedError("Subclass must implement abstract method")
+        if batchNum not in self.batchDict:
+            self.logger.error("Error: batch number " + str(batchNum) + " does not exist")
+            exit(1)
+        return self.batchDict[batchNum]["files"]
+
+    def getBatchSize(self, batchNum):
+        if batchNum not in self.batchDict:
+            self.logger.error("Error: batch number " + str(batchNum) + " does not exist")
+            exit(1)
+        return self.batchDict[batchNum]["size"]
+    def getMaxBatchSize(self):
+        if len(self.batchDict) == 0:
+            return 0 #if there are no batches, return 0
+        return max(map(lambda x: self.batchDict[x]["size"], self.batchDict))

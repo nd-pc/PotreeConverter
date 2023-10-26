@@ -93,7 +93,3 @@ class LocalCopier(Copier):
             exit(1)
         self.logger.info("Files: " + ",".join(filesToConcat) + " concatenated to " + destination + ", size:" + str(size/(1024**3)) + " gigabytes, time: " + str(concatTime) + ", concatenating throughput: " + str((size / concatTime) / (1024**2)) + " MB/s")
 
-    def getPartitionNum(self, batchNum):
-        return self.batchDict[batchNum]["partition"]
-    def getFiles(self, batchNum):
-        return self.batchDict[batchNum]["files"]

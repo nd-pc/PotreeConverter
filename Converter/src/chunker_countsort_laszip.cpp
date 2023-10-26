@@ -677,6 +677,7 @@ namespace chunker_countsort_laszip {
 
                     RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in updating counting grid");
                     {
+
                         // transfer las integer coordinates to new scale/offset/box values
                         double x = coordinates[0];
                         double y = coordinates[1];
@@ -805,8 +806,9 @@ namespace chunker_countsort_laszip {
 			int64_t bpp = header->point_data_record_length;
 			int64_t numPoints = std::max(uint64_t(header->number_of_point_records), header->extended_number_of_point_records);
 
+
 			int64_t pointsLeft = numPoints;
-			int64_t thread_batchSize = 50'000'000;
+			int64_t thread_batchSize = 1'000'000;
 			int64_t numRead = 0;
 
             vector<Source> tmpSources = { source };
@@ -874,8 +876,6 @@ namespace chunker_countsort_laszip {
 
 		pool.waitTillEmpty();
 		pool.close();
-
-
 
 
 		//printElapsedTime("countPointsInCells", tStart);
@@ -1054,11 +1054,11 @@ namespace chunker_countsort_laszip {
 					}
 
 					// copy other attributes
-                    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in distributing points to compute min/max and histogram");
+                    //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in distributing points to compute min/max and histogram");
 					for (auto& handler : attributeHandlers) {
 						handler(offset);
 					}
-                    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in distributing points to compute min/max and histogram");
+                    //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in distributing points to compute min/max and histogram");
 
 				}
 
@@ -1218,7 +1218,7 @@ namespace chunker_countsort_laszip {
 
 			int64_t numPoints = std::max(uint64_t(header->number_of_point_records), header->extended_number_of_point_records);
 			int64_t pointsLeft = numPoints;
-			int64_t thread_batchSize = 50'000'000;
+			int64_t thread_batchSize = 1'000'000;
 			int64_t numRead = 0;
 
 			vector<Source> tmpSources = { source };
@@ -1248,6 +1248,7 @@ namespace chunker_countsort_laszip {
 				task->max = max;
 				task->inputAttributes = inputAttributes;
 
+                 tasks.push_back(task);
 				//pool.addTask(task);
 
 				numRead += numToRead;

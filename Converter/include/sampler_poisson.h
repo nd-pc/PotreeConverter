@@ -179,7 +179,7 @@ struct SamplerPoisson : public Sampler {
 
 			};
 
-            //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "sorting in indexing time");
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "sorting in indexing time");
 			auto parallel = std::execution::par_unseq;
 			std::sort(parallel, points.begin(), points.end(), [center](Point a, Point b) -> bool {
 
@@ -202,7 +202,7 @@ struct SamplerPoisson : public Sampler {
 				// sort by z axis
 				//return a.z < b.z;
 			});
-            //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "sorting in indexing time");
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "sorting in indexing time");
 
 			for (Point point : points) {
 
