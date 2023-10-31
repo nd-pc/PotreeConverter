@@ -784,7 +784,6 @@ namespace chunker_countsort_laszip {
 		auto tStartTaskAssembly = now();
 
         //RECORD_TIMINGS_PARALLEL();
-
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting for creating tasks")
         vector<shared_ptr<Task>> tasks;
 		for (auto source : sources) {
@@ -865,7 +864,7 @@ namespace chunker_countsort_laszip {
 			laszip_close_reader(laszip_reader);
 			laszip_destroy(laszip_reader);
 		}
-        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting for creating tasks")
+
 
         //auto parallel = std::execution::par_unseq;
         //sort(parallel, tasks.begin(), tasks.end(),
@@ -874,6 +873,7 @@ namespace chunker_countsort_laszip {
         for (int i = process_id * tasks_per_node; i < (process_id + 1) * tasks_per_node && i < tasks.size(); i++) {
             pool.addTask(tasks[i]);
         }
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting for creating tasks")
         //for (int i = process_id; i < tasks.size(); i += n_processes) {
          //   pool.addTask(tasks[i]);
         //}
