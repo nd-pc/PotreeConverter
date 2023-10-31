@@ -3,15 +3,16 @@
 //
 
 
+
 #ifndef MPICOMMON_H
 #define MPICOMMON_H
 
 #include <mpi.h>
 
-#define MASTER 0
+#define ROOT 0
 
 
-extern int n_tasks;
-extern int  task_id;
+extern int n_processes;
+extern int  process_id;
 
 #endif //MPICOMMON_H

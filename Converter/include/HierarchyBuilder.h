@@ -293,8 +293,9 @@ struct HierarchyBuilder{
 		fstream fout(hierarchyFilePath, ios::binary | ios::out);
 		int64_t bytesWritten = 0;
 
+
         map<string, vector<string>> hierarchyFiletoPathMap;
-        for (int i = 0; i < n_tasks; i++) {
+        for (int i = 0; i < n_processes; i++) {
             for (auto& entry : fs::directory_iterator(path + "/" + "hierarchyChunks_" + to_string(i))) {
                 auto filepath = entry.path();
                 if (iEndsWith(filepath.string(), ".bin")) {

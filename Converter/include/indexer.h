@@ -87,7 +87,6 @@ namespace indexer{
 
 	shared_ptr<Chunks> getChunks(string pathIn);
 
-	
 
 	struct Indexer;
 
@@ -404,20 +403,20 @@ namespace indexer{
 			this->targetDir = targetDir;
 
 			writer = make_shared<Writer>(this);
-			hierarchyFlusher = make_shared<HierarchyFlusher>(targetDir + "/hierarchyChunks/hierarchyChunks_" + to_string(task_id));
+			hierarchyFlusher = make_shared<HierarchyFlusher>(targetDir + "/hierarchyChunks/hierarchyChunks_" + to_string(process_id));
 
             //Assuming all other datatypes are smaller than int64 and double.
             maxVarSize = std::max(sizeof(int64_t), sizeof(double));
 
-			string chunkRootFile = targetDir + "/tmpChunkRoots_" + to_string(task_id) + ".bin";
+			string chunkRootFile = targetDir + "/tmpChunkRoots_" + to_string(process_id) + ".bin";
 			fChunkRoots.open(chunkRootFile, ios::out | ios::binary);
-            string MPIlogFile = targetDir + "/MPISendRcvlog_" + to_string(task_id) + ".txt";
+            string MPIlogFile = targetDir + "/MPISendRcvlog_" + to_string(process_id) + ".txt";
             MPISendRcvlog.open(MPIlogFile, ios::out);
 
-            //fcrMPIrcv.reserve(n_tasks - 1);
-          //  fcrRcvRequest.reserve(n_tasks - 1);
-            //fcrRcvStatus.reserve(n_tasks - 1);
-            //fcrRcvFlag.reserve(n_tasks - 1);
+            //fcrMPIrcv.reserve(n_processes - 1);
+          //  fcrRcvRequest.reserve(n_processes - 1);
+            //fcrRcvStatus.reserve(n_processes - 1);
+            //fcrRcvFlag.reserve(n_processes - 1);
 		}
 
 		~Indexer() {

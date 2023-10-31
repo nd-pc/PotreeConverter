@@ -628,7 +628,7 @@ namespace chunker_countsort_laszip {
             }
 
             {
-                RECORD_TIMINGS_START(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
+                //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
                 laszip_POINTER laszip_reader;
                 laszip_header *header;
                 laszip_point *point;
@@ -643,7 +643,7 @@ namespace chunker_countsort_laszip {
                 laszip_get_point_pointer(laszip_reader, &point);
                 laszip_seek_point(laszip_reader, task->firstPoint);
 
-                RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
+                //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
 
                 auto attributeHandlers = createAttributeHandlers(header, data, point, inputAttributes,
                                                                  outputAttributesCopy, state);
@@ -668,14 +668,14 @@ namespace chunker_countsort_laszip {
 
                     int64_t pointOffset = i * bpp;
 
-                    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
+                    //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
 
                     laszip_read_point(laszip_reader);
                     laszip_get_coordinates(laszip_reader, coordinates);
 
-                    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
+                    //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
 
-                    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in updating counting grid");
+                    //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in updating counting grid");
                     {
 
                         // transfer las integer coordinates to new scale/offset/box values
@@ -719,7 +719,7 @@ namespace chunker_countsort_laszip {
                         grid[index]++;
 
 
-                        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
+                        //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
                         aPosition->min.x = std::min(aPosition->min.x, x);
                         aPosition->min.y = std::min(aPosition->min.y, y);
                         aPosition->min.z = std::min(aPosition->min.z, z);
@@ -727,17 +727,17 @@ namespace chunker_countsort_laszip {
                         aPosition->max.x = std::max(aPosition->max.x, x);
                         aPosition->max.y = std::max(aPosition->max.y, y);
                         aPosition->max.z = std::max(aPosition->max.z, z);
-                        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
+                        //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
                     }
 
-                    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in updating counting grid");
+                    //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in updating counting grid");
 
                     // for each attribute, compute min/max and histogram
-                    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
+                    //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
                     for (auto& handler : attributeHandlers) {
                         handler(pointOffset);
                     }
-                    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
+                    //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
 
                 }
 
@@ -745,7 +745,7 @@ namespace chunker_countsort_laszip {
                 laszip_destroy(laszip_reader);
             }
             // merge attribute metadata of this batch into global attribute metadata
-            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting for merging attribute metadata of this batch into global attribute metadata")
+            //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting for merging attribute metadata of this batch into global attribute metadata")
             for (int i = 0; i < outputAttributesCopy.list.size(); i++) {
                 Attribute& source = outputAttributesCopy.list[i];
                 Attribute& target = outputAttributes.list[i];
@@ -765,7 +765,7 @@ namespace chunker_countsort_laszip {
                     target.histogram[j] = target.histogram[j] + source.histogram[j];
                 }
             }
-            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting for merging attribute metadata of this batch into global attribute metadata")
+            //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting for merging attribute metadata of this batch into global attribute metadata")
 
 			static int64_t pointsProcessed = 0;
 			pointsProcessed += task->numPoints;
@@ -783,7 +783,9 @@ namespace chunker_countsort_laszip {
 
 		auto tStartTaskAssembly = now();
 
-        RECORD_TIMINGS_PARALLEL();
+        //RECORD_TIMINGS_PARALLEL();
+
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting for creating tasks")
         vector<shared_ptr<Task>> tasks;
 		for (auto source : sources) {
 		//auto parallel = std::execution::par;
@@ -863,14 +865,18 @@ namespace chunker_countsort_laszip {
 			laszip_close_reader(laszip_reader);
 			laszip_destroy(laszip_reader);
 		}
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting for creating tasks")
 
-        auto parallel = std::execution::par_unseq;
-        sort(parallel, tasks.begin(), tasks.end(),
-             [](shared_ptr<Task> a, shared_ptr<Task> b) { return a->numPoints > b->numPoints; });
-
-        for (int i = task_id; i < tasks.size(); i += n_tasks) {
+        //auto parallel = std::execution::par_unseq;
+        //sort(parallel, tasks.begin(), tasks.end(),
+          //   [](shared_ptr<Task> a, shared_ptr<Task> b) { return a->numPoints > b->numPoints; });
+        unsigned int tasks_per_node = tasks.size() / n_processes ? (tasks.size() / n_processes) + 1 :tasks.size() / n_processes;
+        for (int i = process_id * tasks_per_node; i < (process_id + 1) * tasks_per_node && i < tasks.size(); i++) {
             pool.addTask(tasks[i]);
         }
+        //for (int i = process_id; i < tasks.size(); i += n_processes) {
+         //   pool.addTask(tasks[i]);
+        //}
 
 		//printElapsedTime("tStartTaskAssembly", tStartTaskAssembly);
 
@@ -1200,7 +1206,7 @@ namespace chunker_countsort_laszip {
 
 
 
-        RECORD_TIMINGS_PARALLEL();
+        //RECORD_TIMINGS_PARALLEL();
         vector<shared_ptr<Task>> tasks;
 		for (auto source: sources) {
 
@@ -1259,11 +1265,15 @@ namespace chunker_countsort_laszip {
 
 		}
 
-        auto parallel = std::execution::par_unseq;
+        /*auto parallel = std::execution::par_unseq;
         sort(parallel, tasks.begin(), tasks.end(),
              [](shared_ptr<Task> a, shared_ptr<Task> b) { return a->batchSize > b->batchSize; });
 
-        for (int i = task_id; i < tasks.size(); i += n_tasks) {
+        for (int i = process_id; i < tasks.size(); i += n_processes) {
+            pool.addTask(tasks[i]);
+        }*/
+        unsigned int tasks_per_node = tasks.size() / n_processes ? (tasks.size() / n_processes) + 1 :tasks.size() / n_processes;
+        for (int i = process_id * tasks_per_node; i < (process_id + 1) * tasks_per_node && i < tasks.size(); i++) {
             pool.addTask(tasks[i]);
         }
 
@@ -1499,7 +1509,7 @@ namespace chunker_countsort_laszip {
         for (int i = 0; i < outputAttributes.list.size(); i++) {
             std::vector<uint8_t> serializedAttribute = serializeAttribute(outputAttributes.list[i]);
             // Allocate memory for receiving the serialized data from other ranks
-            std::vector<uint8_t> receivedData(serializedAttribute.size() * n_tasks);
+            std::vector<uint8_t> receivedData(serializedAttribute.size() * n_processes);
 
             MPI_Allgather(serializedAttribute.data(), serializedAttribute.size(), MPI_BYTE,
                           receivedData.data(), serializedAttribute.size(), MPI_BYTE, MPI_COMM_WORLD);
@@ -1507,8 +1517,8 @@ namespace chunker_countsort_laszip {
             //MPI_Alltoall(serializedAttribute.data(), serializedAttribute.size(), MPI_BYTE,
             //receivedData.data(), serializedAttribute.size(), MPI_BYTE, MPI_COMM_WORLD);
 
-            for (int j = 0; j < n_tasks; j++) {
-                if (j == task_id)
+            for (int j = 0; j < n_processes; j++) {
+                if (j == process_id)
                     continue;
                 Attribute source = deserializeAttribute(std::vector<uint8_t>(receivedData.data() + j * serializedAttribute.size(),
                                                                              receivedData.data() + (j + 1) *
@@ -1556,13 +1566,13 @@ namespace chunker_countsort_laszip {
 
         int batchNum = 0;
         bool isLastBatch = false;
-        if (task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
-        if (task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
+        if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
+        if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
         while (!fs::exists(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
         MPI_Barrier(MPI_COMM_WORLD);
-        if (task_id == MASTER)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting");
+        if (process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting");
         int totalFilesCounted = 0;
         while (!isLastBatch) {
             // cout << "waiting for file" << endl;
@@ -1611,16 +1621,16 @@ namespace chunker_countsort_laszip {
 
 
 
-            if (task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total counting time");
+            if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total counting time");
             auto tStart = now();
             countPointsInCells(sources, min, max, grid, gridSize,
                                state,
                                outputAttributes, monitor);
             MPI_Barrier(MPI_COMM_WORLD);
             auto duration = now() - tStart;
-            if (task_id == MASTER) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total counting time");
+            if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total counting time");
             totalFilesCounted += sources.size();
-            if (task_id == MASTER) {
+            if (process_id == ROOT) {
                 fstream signalToCopier;
                 signalToCopier.open(
                         targetDir + "/counting_done_signals/batchno_" + to_string(batchNum) + "_counting_done",
@@ -1635,23 +1645,23 @@ namespace chunker_countsort_laszip {
                 }
             }
             batchNum++;
-            if (task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting")
+            if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting")
             while (!fs::exists(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
                 if (isLastBatch)
                     break;
                 else
                     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             }
-            if (task_id == MASTER) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting")
+            if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting")
 
         }
         MPI_Barrier(MPI_COMM_WORLD);
         cout << "Done counting" << endl;
         flush(cout);
-        if (task_id == MASTER) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu,  "Total time spent in counting including waiting for copying");
+        if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu,  "Total time spent in counting including waiting for copying");
         cout << "Summing up counting grids of all MPI processes..." << endl;
         flush(cout);
-        if (task_id == MASTER) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in summing up the counting grids of all MPI processes");
+        if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in summing up the counting grids of all MPI processes");
         // Temporary buffer with compatible data type (int)
         std::vector<int> tempBuffer(grid.size());
 
@@ -1667,7 +1677,7 @@ namespace chunker_countsort_laszip {
         for (size_t i = 0; i < grid.size(); ++i) {
             grid[i].store(tempBuffer[i]);
         }
-        if (task_id == MASTER) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total time spent in summing up the counting grids of all MPI processes");
+        if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total time spent in summing up the counting grids of all MPI processes");
         cout << "Done summing up counting grids of all MPI processes" << endl;
         flush(cout);
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in finding global min/max for the attributes")
@@ -1679,7 +1689,7 @@ namespace chunker_countsort_laszip {
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in finding global min/max for the attributes")
         //MPI_Barrier(MPI_COMM_WORLD);
 
-        string metadataPath = targetDir + "/chunks_" + to_string(task_id) + "/metadata.json";
+        string metadataPath = targetDir + "/chunks_" + to_string(process_id) + "/metadata.json";
         double cubeSize = ceil((max - min).max());
         Vector3 size = {cubeSize, cubeSize, cubeSize};
         max = min + cubeSize;
