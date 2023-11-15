@@ -3,7 +3,6 @@
 
 #include <iostream>
 #include <execution>
-#include "MPIcommon.h"
 #include "unsuck/unsuck.hpp"
 #include "chunker_countsort_laszip.h"
 #include "indexer.h"
@@ -41,6 +40,7 @@ Options parseArguments(int argc, char** argv) {
 	args.addArgument("generate-page,p", "Generate a ready to use web page with the given name");
 	args.addArgument("title", "Page title used when generating a web page");
     args.addArgument("threads", "Number of threads to use");
+    args.addArgument("--concat-output", "Concatenate the output files into a single file");
 
 	if (args.has("help")) {
 		cout << "PotreeConverter <source> -o <outdir>" << endl;
@@ -99,6 +99,7 @@ Options parseArguments(int argc, char** argv) {
 	bool keepChunks = args.has("keep-chunks");
 	bool noChunking = args.has("no-chunking");
 	bool noIndexing = args.has("no-indexing");
+    bool concatOutput = args.has("--concat-output");
 
 
 	Options options;
@@ -117,6 +118,7 @@ Options parseArguments(int argc, char** argv) {
 	options.keepChunks = keepChunks;
 	options.noChunking = noChunking;
 	options.noIndexing = noIndexing;
+    options.concatOutput = concatOutput;
     int maxThreads = (int)std::thread::hardware_concurrency();
     int threads = args.get("threads").as<int>(maxThreads);
     setNumProcessors(threads);
@@ -413,7 +415,7 @@ Stats computeStats(vector<Source> headers) {
 
 // 	return monitor;
 // }
-shared_ptr<indexer::Chunks> indexing(Options& options, string chunksDir, State& state, indexer::Indexer& indexer, bool islastbatch, shared_ptr<map<string, vector<string>>> chunkFiletoPathMap) {
+shared_ptr<indexer::Chunks> indexing(Options& options, string chunksDir, State& state, indexer::Indexer& indexer, bool islastbatch) {
 
     if (options.noIndexing) {
         return nullptr;
@@ -427,17 +429,17 @@ shared_ptr<indexer::Chunks> indexing(Options& options, string chunksDir, State& 
     if (options.method == "random") {
 
         SamplerRandom sampler;
-        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch, chunkFiletoPathMap);
+        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch);
 
     } else if (options.method == "poisson") {
 
         SamplerPoisson sampler;
-        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch, chunkFiletoPathMap);
+        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch);
 
     } else if (options.method == "poisson_average") {
 
         SamplerPoissonAverage sampler;
-        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch, chunkFiletoPathMap);
+        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch);
 
     }
     else {
@@ -472,20 +474,7 @@ void finalMerge(Options& options, string targetDir, State& state, indexer::Index
     }
 }
 
-shared_ptr<map<string, vector<string>>> mapChunkstoPaths(string targetDir){
-    shared_ptr<map<string, vector<string>>> chunkFiletoPathMap = make_shared<map<string, vector<string>>>();
-    for (int i = 0; i < n_processes; i++) {
-        for (auto& entry : fs::directory_iterator(targetDir + "/" + "chunks_" + to_string(i))) {
-            auto filepath = entry.path();
-            if (iEndsWith(filepath.string(), ".bin")) {
-                (*chunkFiletoPathMap)[filepath.filename().string()].push_back(filepath.string());
-            }
-        }
-    }
-    return chunkFiletoPathMap;
 
-
-}
 void process(Options& options, Stats& stats, State& state, string targetDir, Attributes &outputAttributes, Monitor* monitor) {
 
     chunker_countsort_laszip::NodeLUT lut;
@@ -512,7 +501,6 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
         exit(123);
 
     }
-    MPI_Barrier(MPI_COMM_WORLD);
 
     int batchNum = 0;
     bool isLastbatch = false;
@@ -520,13 +508,13 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
     indexer.root = make_shared<Node>("r", stats.min, stats.max);
 
     shared_ptr<indexer::Chunks> chunks;
-    if(process_id == ROOT)RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
-    if(process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
+    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
+    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
     while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
-    MPI_Barrier(MPI_COMM_WORLD);
-    if(process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
+
+    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
     auto duration = 0.0;
     while (!isLastbatch) {
         // cout << "waiting for file" << endl;
@@ -562,91 +550,86 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
 
         auto sources = curateSources(lazFilesVec);
 
-         if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Distribution time");
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Distribution time");
         auto tStartDist = now();
-        chunker_countsort_laszip::doDistribution(stats.min, stats.max, state, lut, targetDir + "/chunks_" + to_string(process_id), sources,
+        chunker_countsort_laszip::doDistribution(stats.min, stats.max, state, lut, targetDir + "/chunks", sources,
                                                  outputAttributes, monitor);
         duration += now() - tStartDist;
         logger::INFO("Grid errors in distribution till now: " + to_string(logger::totalGridErrors));
-        if (process_id == ROOT)  RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Distribution time");
-        MPI_Barrier(MPI_COMM_WORLD);
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Distribution time");
 
-        shared_ptr<map<string, vector<string>>> chunkFiletoPathMap = mapChunkstoPaths(targetDir);
-        MPI_Barrier(MPI_COMM_WORLD);
 
-        if(process_id == ROOT)RECORD_TIMINGS_START (recordTimings::Machine::cpu, "wait time for concatenating octree files");
-        while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated")) && ((batchNum - 1) >= 0)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        }
-        if (process_id == ROOT) RECORD_TIMINGS_STOP (recordTimings::Machine::cpu, "wait time for concatenating octree files");
-        MPI_Barrier(MPI_COMM_WORLD);
-
-        if(process_id == ROOT) {
-            //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
-            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing time");
-        }
-        auto tStartIndex = now();
-        chunks = indexing(options, targetDir + "/chunks_" + to_string(process_id), state, indexer, isLastbatch, chunkFiletoPathMap);
-        duration += now() - tStartIndex;
-        if(process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Indexing time");
-        MPI_Barrier(MPI_COMM_WORLD);
-
-        if(process_id == ROOT) {
-
-            if (!isLastbatch) {
-                fstream signalToCopier;
-                signalToCopier.open(targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum) + "_indexing_done", ios::out);
-                signalToCopier << to_string(duration);// << "\n" << "msgcomplete";
-                signalToCopier.close();
-                {
-                    fstream().open(
-                            targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum) + "_indexing"+ "_time_written",
-                            ios::out);
-                }
+        if (options.concatOutput) {
+            RECORD_TIMINGS_START (recordTimings::Machine::cpu, "wait time for concatenating octree files");
+            while (!fs::exists(fs::path(
+                    targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum - 1) + "_concatenated")) &&
+                   ((batchNum - 1) >= 0)) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             }
-            batchfiles.close();
-            //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"));
+            RECORD_TIMINGS_STOP (recordTimings::Machine::cpu, "wait time for concatenating octree files");
         }
+
+            //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing time");
+        auto tStartIndex = now();
+        chunks = indexing(options, targetDir + "/chunks", state, indexer, isLastbatch);
+        duration += now() - tStartIndex;
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Indexing time");
+
+
+        if (!isLastbatch) {
+            fstream signalToCopier;
+            signalToCopier.open(targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum) + "_indexing_done", ios::out);
+            signalToCopier << to_string(duration);// << "\n" << "msgcomplete";
+            signalToCopier.close();
+            {
+                fstream().open(
+                        targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum) + "_indexing"+ "_time_written",
+                        ios::out);
+            }
+        }
+        batchfiles.close();
+            //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"));
         batchNum++;
         if(!isLastbatch)    duration = 0.0;
-        if(process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
         while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
             if (isLastbatch)
                 break;
             else
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
-        MPI_Barrier(MPI_COMM_WORLD);
-        if(process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
+
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
 
     }
 
-    if(process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
+    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
 
-    if(process_id == ROOT) {
-        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Final merge time");
-        cout << "Final merge..." << endl;
-        finalMerge(options, targetDir, state, indexer, chunks);
-        cout << "Final merge done" << endl;
-        fstream signalToCopier;
-        signalToCopier.open(targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing_done", ios::out);
-        signalToCopier << to_string(duration);//<< "\n" << "msgcomplete";
-        signalToCopier.close();
-        {
-            fstream().open(
-                    targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing"+ "_time_written",
-                    ios::out);
-        }
-        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Final merge time");
-        RECORD_TIMINGS_START (recordTimings::Machine::cpu, "wait time for concatenating octree files");
-        while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated")) && ((batchNum - 1) >= 0)) {
+    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Final merge time");
+    cout << "Final merge..." << endl;
+    finalMerge(options, targetDir, state, indexer, chunks);
+    cout << "Final merge done" << endl;
+    fstream signalToCopier;
+    signalToCopier.open(targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing_done", ios::out);
+    signalToCopier << to_string(duration);//<< "\n" << "msgcomplete";
+    signalToCopier.close();
+    {
+        fstream().open(
+                targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing"+ "_time_written",
+                ios::out);
+    }
+    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Final merge time");
+    RECORD_TIMINGS_START (recordTimings::Machine::cpu, "wait time for concatenating octree files");
+    if(options.concatOutput) {
+        while (!fs::exists(fs::path(
+                targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum - 1) + "_concatenated")) &&
+               ((batchNum - 1) >= 0)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
         RECORD_TIMINGS_STOP (recordTimings::Machine::cpu, "wait time for concatenating octree files");
-        //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
     }
-
-    MPI_Barrier(MPI_COMM_WORLD);
+        //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
 
 }
 
@@ -776,22 +759,14 @@ void generatePage(string exePath, string pagedir, string pagename) {
 //map<pid_t, recordTimings::Record_timings> thread_time_record_map;\
 //map<string, vector<pid_t>> desc_thread_map;
 
-int n_processes, process_id;
 
 RECORD_TIMINGS_INIT();
 int main(int argc, char **argv) {
 
 
     //RECORD_TIMINGS_DISABLE();
-    cout << "PotreeConverterMPI started" << endl;
+    cout << "PotreeConverter started" << endl;
     int provided;
-    MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &provided);
-    if (provided != MPI_THREAD_SERIALIZED) {
-        cout << "MPI does not support MPI_THREAD_SERIALIZED" << endl;
-        exit(1);
-    }
-    MPI_Comm_size(MPI_COMM_WORLD, &n_processes);
-    MPI_Comm_rank(MPI_COMM_WORLD, &process_id);
     // { // DEBUG STUFF
 
     // 	string hierarchyDir = "D:/dev/pointclouds/Riegl/retz_converted/.hierarchyChunks";
@@ -805,7 +780,7 @@ int main(int argc, char **argv) {
 
 
 
-    if(process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "The total_execution time");
+    RECORD_TIMINGS_START(recordTimings::Machine::cpu, "The total_execution time");
 
     double tStart = now();
 
@@ -833,22 +808,17 @@ int main(int argc, char **argv) {
     options.name = splitString("/", options.headerDir).back();
 
     string targetDir = options.outdir;
-    if (options.generatePage && process_id == ROOT) {
 
-        string pagedir = targetDir;
-        generatePage(exePath, pagedir, options.pageName);
+    string pagedir = targetDir;
+    generatePage(exePath, pagedir, options.pageName);
 
-        targetDir = targetDir + "/pointclouds/" + options.pageName;
-    }
+    targetDir = targetDir + "/pointclouds/" + options.pageName;
     cout << "target directory: '" << targetDir << "'" << endl;
 
-    if (process_id == ROOT) fs::create_directories(targetDir + "/hierarchyChunks");
-    fs::create_directories(targetDir + "/chunks_" + to_string(process_id));
 
-    string logFile = targetDir + "/log_" + to_string(process_id) + ".txt";
+    string logFile = targetDir + "/log.txt";
     logger::addOutputFile(logFile);
 
-    MPI_Barrier(MPI_COMM_WORLD);
     State state;
     state.pointsTotal = stats.totalPoints;
     state.bytesProcessed = stats.totalBytes;
@@ -864,23 +834,17 @@ int main(int argc, char **argv) {
     //sate for keeping track of points processed
     process(options, stats, state, targetDir, outputAttributes, monitor.get());
 
-
-
-
-    if (process_id == ROOT) {
-        createReport(options, headers, targetDir, stats, state, tStart);
-    }
+    createReport(options, headers, targetDir, stats, state, tStart);
 
 
 
 
-    if(process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "The total_execution time");
+    RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "The total_execution time");
 
     fstream recordTimingsFile;
-    recordTimingsFile.open(targetDir + "/recordTimings" + to_string(process_id) + ".txt", ios::out);
-    /*if(process_id == ROOT)*/ RECORD_TIMINGS_PRINT(recordTimingsFile);
+    recordTimingsFile.open(targetDir + "/recordTimings.txt", ios::out);
+    RECORD_TIMINGS_PRINT(recordTimingsFile);
 
-    MPI_Finalize();
 
     return 0;
 }

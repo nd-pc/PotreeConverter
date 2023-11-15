@@ -4,7 +4,6 @@
 #include <algorithm>
 
 
-#include "MPIcommon.h"
 #include "indexer.h"
 
 #include "logger.h"
@@ -52,7 +51,7 @@ namespace indexer {
         return mask;
     }
 
-    shared_ptr<Chunks> getChunks(string chunkDirectory,  shared_ptr<map<string, vector<string>>> chunkFiletoPathMap) {
+    shared_ptr<Chunks> getChunks(string chunkDirectory) {
         //string chunkDirectory = pathIn + "/chunks";
         //string chunkDirectory = pathIn + "/chunks";
 
@@ -70,6 +69,7 @@ namespace indexer {
                 js["max"][1].get<double>(),
                 js["max"][2].get<double>()
         };
+
 
 
         vector<Attribute> attributeList;
@@ -150,374 +150,48 @@ namespace indexer {
         };
 
         vector<shared_ptr<Chunk>> chunksToLoad;
-        for (auto const &[key, paths]: *chunkFiletoPathMap) {
-            //cout << key << " : " << val << endl;
-            //for (const auto &entry: fs::directory_iterator(chunkDirectory)) {
-            shared_ptr<Chunk> chunk = make_shared<Chunk>();
-            for (auto const &entry: paths) {
-                string filename = fs::path(entry).filename().string();
-                string chunkID = toID(filename);
+        for (const auto &entry: fs::directory_iterator(chunkDirectory)) {
+            string filename = entry.path().filename().string();
+            string chunkID = toID(filename);
 
-                if (!iEndsWith(filename, ".bin")) {
-                    continue;
-                }
-
-
-                chunk->files.push_back(entry);
-                chunk->id = chunkID;
-                chunk->numPoints += file_size(fs::path(entry)) / attributes.bytes;
-
-                BoundingBox box = {min, max};
-
-                for (int i = 1; i < chunkID.size(); i++) {
-                    int index = chunkID[i] - '0'; // this feels so wrong...
-
-                    box = childBoundingBoxOf(box.min, box.max, index);
-                }
-
-                chunk->min = box.min;
-                chunk->max = box.max;
+            if (!iEndsWith(filename, ".bin")) {
+                continue;
             }
+
+            shared_ptr<Chunk> chunk = make_shared<Chunk>();
+            chunk->file = entry.path().string();
+            chunk->id = chunkID;
+            chunk->numPoints = file_size(entry.path()) / attributes.bytes;
+
+            BoundingBox box = {min, max};
+
+            for (int i = 1; i < chunkID.size(); i++) {
+                int index = chunkID[i] - '0'; // this feels so wrong...
+
+                box = childBoundingBoxOf(box.min, box.max, index);
+            }
+
+            chunk->min = box.min;
+            chunk->max = box.max;
+
             chunksToLoad.push_back(chunk);
-
-
         }
+
+
         auto chunks = make_shared<Chunks>(chunksToLoad, min, max);
         chunks->attributes = attributes;
+
+
         return chunks;
     }
 
-    void Indexer::sendCRdone() {
 
-        if (fcrMPIsend != nullptr) {
-            MPISendRcvlog << "Waiting for previous send of chunkroot " << fcrWaiting.node->name << " to complete.....";
-            MPISendRcvlog.flush();
-            MPI_Wait(&fcrSendRequest, MPI_STATUS_IGNORE);
-            MPISendRcvlog << "Done" << endl;
-            MPISendRcvlog.flush();
-            free(fcrMPIsend);
-        }
-        int64_t sendSize = 3 * maxVarSize + maxVarSize;
-        uint8_t *msgBuffer = (uint8_t *) calloc(sendSize, 1);
-        std::string done = "ChunkRootsDone";
-        memcpy((msgBuffer), reinterpret_cast<uint8_t *>(&sendSize), sizeof(int64_t));
-        memcpy((msgBuffer + maxVarSize), reinterpret_cast<const uint8_t *>(done.c_str()), done.size());
-        MPI_Send(msgBuffer, sendSize, MPI_BYTE, ROOT, 10, MPI_COMM_WORLD);
-        MPISendRcvlog << "ChunkRootsDone" << endl;
-        MPISendRcvlog.flush();
-        free(msgBuffer);
-
-    }
-
-    void Indexer::rcvflushedChunkRoot() {
-
-        vector<int> activeTasks;
-        for (int i = 0; i < n_processes - 1; i++){
-            activeTasks.push_back(i + 1);
-        }
-        /*for (auto i: activeTasks) {
-            //fcrMPIrcv[i] = (uint8_t *) calloc(fcrRcvBufferSize, 1);
-            //fcrRcvRequest[i] = MPI_REQUEST_NULL;
-            //MPI_Irecv(fcrMPIrcv[i], fcrRcvBufferSize, MPI_BYTE, i, 10, MPI_COMM_WORLD, &fcrRcvRequest[i]);
-            fcrRcvFlag[i] = 0;
-            MPI_Iprobe(i, 10, MPI_COMM_WORLD, &fcrRcvFlag[i], &fcrRcvStatus[i]);
-            MPISendRcvlog << "Expecting flushedChunkRoot from task " << i << endl;
-            MPISendRcvlog.flush();
-        }*/
-        while (!activeTasks.empty()) {
-            for (auto it = activeTasks.begin(); it < activeTasks.end(); ++it) {
-                //int check = 1;
-                ///MPI_Wait(&fcrRcvRequest[*it], MPI_STATUS_IGNORE);
-                //MPI_Status status;
-                //MPI_Probe(*it, 10, MPI_COMM_WORLD, &status);
-                int fcrRcvFlag = 0;
-                MPI_Status fcrRcvStatus;
-                MPI_Iprobe(*it, 10, MPI_COMM_WORLD, &fcrRcvFlag, &fcrRcvStatus);
-                //MPISendRcvlog << "Expecting flushedChunkRoot from task " << *it << endl;
-                //MPISendRcvlog.flush();
-                if (fcrRcvFlag) {
-                    int rcvSize = 0;// = *(reinterpret_cast<int64_t *>(fcrMPIrcv[*it]);
-                    MPI_Get_count(&fcrRcvStatus, MPI_BYTE, &rcvSize);
-                    uint8_t *buffer = (uint8_t *) calloc(rcvSize, 1);
-                    MPI_Recv(buffer, rcvSize, MPI_BYTE, *it, 10, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
-                    MPISendRcvlog << "Indexer: received flushedChunkRoot from task " << *it;
-                    MPISendRcvlog.flush();
-                    MPISendRcvlog << " with size " << rcvSize;
-                    int64_t rcvSize_buffer = *(reinterpret_cast<int64_t *>(buffer));
-                    MPISendRcvlog << " with size from buffer " << rcvSize_buffer << endl;
-                    // MPISendRcvlog << "Received from process " << fcrRcvStatus[*it].MPI_SOURCE
-                    //         << "; with tag " << fcrRcvStatus[*it].MPI_TAG << " with error" << fcrRcvStatus[*it].MPI_ERROR << endl;
-                    //MPISendRcvlog << " buffer " << reinterpret_cast<char *>(buffer);
-                    MPISendRcvlog.flush();
-                    /*if (rcvSize > fcrRcvBufferSize) {
-                        cerr << "The flushedChunkRoot sent by task " << *it
-                             << " is too big. Please increase the size of the buffer in the indexer." << endl;
-                        MPI_Abort(MPI_COMM_WORLD, 1);
-                    }*/
-                    char name[24] = {0};// (char *) calloc(3 * maxVarSize, 1);
-                    memcpy(name, reinterpret_cast<char *>(buffer + maxVarSize), 3 * maxVarSize);
-                    if (std::string(name) != "ChunkRootsDone") {
-                        FlushedChunkRoot fcr;
-                        MPISendRcvlog << " with name " << name << endl;
-                        MPISendRcvlog.flush();
-                        fcr.node = make_shared<Node>();
-                        fcr.node->name = name;
-                        fcr.node->min.x = *(reinterpret_cast<double *>(buffer + 4 * maxVarSize));
-                        fcr.node->min.y = *(reinterpret_cast<double *>(buffer + 5 * maxVarSize));
-                        fcr.node->min.z = *(reinterpret_cast<double *>(buffer + 6 * maxVarSize));
-                        fcr.node->max.x = *(reinterpret_cast<double *>(buffer + 7 * maxVarSize));
-                        fcr.node->max.y = *(reinterpret_cast<double *>(buffer + 8 * maxVarSize));
-                        fcr.node->max.z = *(reinterpret_cast<double *>(buffer + 9 * maxVarSize));
-                        fcr.node->indexStart = *(reinterpret_cast<int64_t *>(buffer + 10 * maxVarSize));
-                        fcr.node->byteOffset = *(reinterpret_cast<int64_t *>(buffer + 11 * maxVarSize));
-                        fcr.node->byteSize = *(reinterpret_cast<int64_t *>(buffer + 12 * maxVarSize));
-                        fcr.node->numPoints = *(reinterpret_cast<int64_t *>(buffer + 13 * maxVarSize));
-                        fcr.node->sampled = *(reinterpret_cast<bool *>(buffer + 14 * maxVarSize));
-                        fcr.offset = *(reinterpret_cast<int64_t *>(buffer + 15 * maxVarSize));
-                        fcr.size = *(reinterpret_cast<int64_t *>(buffer + 16 * maxVarSize));
-                        fcr.taskID = *(reinterpret_cast<int64_t *>(buffer + 17 * maxVarSize));
-                        int numColors = *(reinterpret_cast<int64_t *>(buffer + 18 * maxVarSize));
-                        for (int j = 0; j < numColors; j++) {
-                            CumulativeColor colors = *(reinterpret_cast<CumulativeColor *>(buffer +
-                                                                                           19 * maxVarSize + j *
-                                                                                                             sizeof(CumulativeColor)));;
-                            //cc.r = *(reinterpret_cast<int16_t*>(fcrMPIrcv[i] + 19*maxVarSize + j*sizeof(CumulativeColor)));
-                            //cc.g = *(reinterpret_cast<int16_t*>(fcrMPIrcv[i] + 19*maxVarSize + j*sizeof(CumulativeColor) + sizeof(int16_t)));
-                            //cc.b = *(reinterpret_cast<int16_t*>(fcrMPIrcv[i] + 19*maxVarSize + j*sizeof(CumulativeColor) + 2*sizeof(int16_t)));
-                            //cc.w = *(reinterpret_cast<int16_t*>(fcrMPIrcv[i] + 19*maxVarSize + j*sizeof(CumulativeColor) + 3*sizeof(int16_t)));
-                            fcr.node->colors.push_back(colors);
-                        }
-
-                        //{
-                        //lock_guard<mutex> lock(mtx_chunkRoot);
-                        mtx_chunkRoot.lock();
-                        flushedChunkRoots.push_back(fcr);
-                        mtx_chunkRoot.unlock();
-                        //}
-                        //free(fcrMPIrcv[*it]);
-                        //fcrMPIrcv[*it] = (uint8_t *) calloc(fcrRcvBufferSize, 1);
-                        //fcrRcvRequest[*it] = MPI_REQUEST_NULL;
-                        //fcrRcvFlag[*it] = 0;
-                        //MPI_Iprobe(*it, 10, MPI_COMM_WORLD, &fcrRcvFlag[*it], &fcrRcvStatus[*it]);
-                        //MPI_Irecv(fcrMPIrcv[*it], fcrRcvBufferSize, MPI_BYTE, *it, 10, MPI_COMM_WORLD,
-                        //&fcrRcvRequest[*it]);
-                        //MPISendRcvlog << "Expecting flushedChunkRoot from task " << *it << endl;
-                        //MPISendRcvlog.flush();
-
-                    } else {
-                        MPISendRcvlog << "Task " << *it << " is done" << endl;
-                        MPISendRcvlog.flush();
-                        activeTasks.erase(it);
-
-                    }
-                    free(buffer);
-                }
-            }
-        }
-    }
-
-    void Indexer::packAndSend(indexer::FlushedChunkRoot fcr) {
-
-
-
-        // Assuming maxVarSize is atleast 8 bytes, 3 * maxVarSize bytes are reseved for name.
-        int64_t sendSize =
-                3 * maxVarSize + 3 * maxVarSize + 3 * maxVarSize + 4 * maxVarSize + maxVarSize + 2 * maxVarSize +
-                maxVarSize + maxVarSize + maxVarSize + fcr.node->colors.size() * sizeof(CumulativeColor);
-        fcrMPIsend = (uint8_t *) calloc(sendSize, 1);
-        if (fcrMPIsend == NULL) {
-            cerr << "Error allocating memory for fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        uint8_t *dest = (uint8_t *) memcpy((fcrMPIsend), reinterpret_cast<uint8_t *>(&sendSize), sizeof(int64_t));
-
-        if (dest == NULL) {
-            cerr << "Error copying sendSize to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-
-        dest = (uint8_t *) memcpy((fcrMPIsend + maxVarSize), reinterpret_cast<const uint8_t *>(fcr.node->name.c_str()),
-                                  fcr.node->name.size());
-        if (dest == NULL) {
-            cerr << "Error copying name to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-
-        int64_t rcvSize = *(reinterpret_cast<int64_t *>(fcrMPIsend));
-        MPISendRcvlog << "rcvSize = " << rcvSize << endl;
-        MPISendRcvlog.flush();
-        char name[24] = {0};
-        memcpy((name), reinterpret_cast<char *>(fcrMPIsend + maxVarSize), 24);
-        MPISendRcvlog << "name = " << name << endl;
-        MPISendRcvlog.flush();
-        dest = (uint8_t *) memcpy((fcrMPIsend + 4 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->min.x),
-                                  sizeof(double));
-        if (dest == NULL) {
-            cerr << "Error copying min.x to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        dest = (uint8_t *) memcpy((fcrMPIsend + 5 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->min.y),
-                                  sizeof(double));
-        if (dest == NULL) {
-            cerr << "Error copying min.y to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        dest = (uint8_t *) memcpy((fcrMPIsend + 6 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->min.z),
-                                  sizeof(double));
-        if (dest == NULL) {
-            cerr << "Error copying min.z to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        dest = (uint8_t *) memcpy((fcrMPIsend + 7 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->max.x),
-                                  sizeof(double));
-        if (dest == NULL) {
-            cerr << "Error copying max.x to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-
-        dest = (uint8_t *) memcpy((fcrMPIsend + 8 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->max.y),
-                                  sizeof(double));
-        if (dest == NULL) {
-            cerr << "Error copying max.y to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        dest = (uint8_t *) memcpy((fcrMPIsend + 9 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->max.z),
-                                  sizeof(double));
-        if (dest == NULL) {
-            cerr << "Error copying max.z to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        dest = (uint8_t *) memcpy((fcrMPIsend + 10 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->indexStart),
-                                  sizeof(int64_t));
-        if (dest == NULL) {
-            cerr << "Error copying indexStart to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-
-        dest = (uint8_t *) memcpy((fcrMPIsend + 11 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->byteOffset),
-                                  sizeof(int64_t));
-        if (dest == NULL) {
-            cerr << "Error copying byteOffset to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        dest = (uint8_t *) memcpy((fcrMPIsend + 12 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->byteSize),
-                                  sizeof(int64_t));
-        if (dest == NULL) {
-            cerr << "Error copying byteSize to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        dest = (uint8_t *) memcpy((fcrMPIsend + 13 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->numPoints),
-                                  sizeof(int64_t));
-        if (dest == NULL) {
-            cerr << "Error copying numPoints to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        dest = (uint8_t *) memcpy((fcrMPIsend + 14 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->sampled),
-                                  sizeof(bool));
-        if (dest == NULL) {
-            cerr << "Error copying sampled to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        dest = (uint8_t *) memcpy((fcrMPIsend + 15 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.offset),
-                                  sizeof(int64_t));
-        if (dest == NULL) {
-            cerr << "Error copying offset to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        dest = (uint8_t *) memcpy((fcrMPIsend + 16 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.size),
-                                  sizeof(int64_t));
-        if (dest == NULL) {
-            cerr << "Error copying size to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        dest = (uint8_t *) memcpy((fcrMPIsend + 17 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.taskID),
-                                  sizeof(int64_t));
-        if (dest == NULL) {
-            cerr << "Error copying taskID to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        int64_t numColors = fcr.node->colors.size();
-        dest = (uint8_t *) memcpy((fcrMPIsend + 18 * maxVarSize), reinterpret_cast<uint8_t *>(&numColors),
-                                  sizeof(int64_t));
-        if (dest == NULL) {
-            cerr << "Error copying numColors to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-
-        dest = (uint8_t *) memcpy((fcrMPIsend + 19 * maxVarSize), reinterpret_cast<uint8_t *>(fcr.node->colors.data()),
-                                  fcr.node->colors.size() * sizeof(CumulativeColor));
-        if (dest == NULL) {
-            cerr << "Error copying colors to fcrMPIsend by MPI rank " << process_id << endl;
-            flush(cerr);
-            MPI_Abort(MPI_COMM_WORLD, 1);
-        }
-        //fcrSendRequest = MPI_REQUEST_NULL;
-
-        MPI_Isend(fcrMPIsend, sendSize, MPI_BYTE, ROOT, 10, MPI_COMM_WORLD, &fcrSendRequest);
-        fcrWaiting = fcr;
-        MPISendRcvlog << "Sent " << fcr.node->name << " to " << "ROOT" << " in " << sendSize << " bytes." << endl;
-        MPISendRcvlog.flush();
-    }
-
-    void Indexer::sendflushedChunkRoot(indexer::FlushedChunkRoot fcr) {
-        //const int nitems=11;
-
-
-        if (fcrMPIsend == nullptr) {
-            packAndSend(fcr);
-        } else {
-            MPISendRcvlog << "Waiting for previous send of chunkroot " << fcrWaiting.node->name << " to complete.....";
-            MPISendRcvlog.flush();
-            MPI_Wait(&fcrSendRequest, MPI_STATUS_IGNORE);
-            MPISendRcvlog << "Done." << endl;
-            MPISendRcvlog.flush();
-            free(fcrMPIsend);
-            packAndSend(fcr);
-        }
-
-
-
-
-
-
-        //int blocklengths[nitems] = {12, static_cast<int>(fcr.node->colors.size()*4*sizeof(int64_t)), 3, 3, 1, 1, 1, 1, 1, 1, 1 };
-        //MPI_Datatype types[2] = {MPI_CHAR, MPI_INT64_T, MP};
-        //MPI_Datatype mpi_car_type;
-        //MPI_Aint     offsets[2];
-
-        // offsets[0] = offsetof(car, shifts);
-        //offsets[1] = offsetof(car, topSpeed);
-
-        //MPI_Type_create_struct(nitems, blocklengths, offsets, types, &mpi_car_type);
-        //MPI_Type_commit(&mpi_car_type);
-
-    }
 
     // Overload the << operator for FlushedChunkRoot
     std::ostream& operator<<(std::ostream& os, const FlushedChunkRoot& root) {
         os << "FlushedChunkRoot:" << std::endl;
         os << "  Offset: " << root.offset << std::endl;
         os << "  Size: " << root.size << std::endl;
-        os << "  Task ID: " << root.taskID << std::endl;
 
         if (root.node) {
             os << "  Node:" << std::endl;
@@ -539,9 +213,8 @@ namespace indexer {
 
     void Indexer::flushChunkRoot(shared_ptr<Node> chunkRoot) {
 
-        //lock_guard<mutex> lock(mtx_chunkRoot);
+        lock_guard<mutex> lock(mtx_chunkRoot);
 
-        mtx_chunkRoot.lock();
         static int64_t offset = 0;
         int64_t size = chunkRoot->points->size;
 
@@ -552,24 +225,9 @@ namespace indexer {
         fcr.node = chunkRoot;
         fcr.offset = offset;
         fcr.size = size;
-        fcr.taskID = process_id;
-
         chunkRoot->points = nullptr;
-
-
-        if (process_id == ROOT) {
-
-            flushedChunkRoots.push_back(fcr);
-
-        } else {
-            MPISendRcvlog << "The flushed chunkroots sent to ROOT: " << endl;
-            MPISendRcvlog << fcr << endl;
-            sendflushedChunkRoot(fcr);
-        }
-
-
+        flushedChunkRoots.push_back(fcr);
         offset += size;
-        mtx_chunkRoot.unlock();
     }
 
     vector<CRNode> Indexer::processChunkRoots() {
@@ -1820,13 +1478,23 @@ namespace indexer {
 
     Writer::Writer(Indexer *indexer) {
         this->indexer = indexer;
+        string octreePath = indexer->targetDir + "/octree.bin";
+        fsOctree.open(octreePath, ios::out | ios::binary);
+        launchWriterThread();
 
     }
 
     void Writer::launch() {
 
-        string octreePath = indexer->targetDir + "/octree_" + to_string(process_id) + ".bin";
+        string octreePath = indexer->targetDir + "/octree.bin";
+        if (fs::exists(octreePath)) {
+            fs::remove(indexer->targetDir + "/octree.bin");
+        }
         fsOctree.open(octreePath, ios::out | ios::binary);
+        indexer->bytesInMemory = 0;
+        indexer->bytesWritten = 0;
+        indexer->bytesToWrite = 0;
+
         this->closed = false;
         this->closeRequested = false;
         this->activeBuffer = nullptr;
@@ -1915,9 +1583,7 @@ namespace indexer {
     void Writer::launchWriterThread() {
         thread([&]() {
 
-            indexer->bytesInMemory = 0;
-            indexer->bytesWritten = 0;
-            indexer->bytesToWrite = 0;
+
 
             while (true) {
 
@@ -1974,7 +1640,7 @@ namespace indexer {
     }
 
 
-    shared_ptr<Chunks> doIndexing(string chunksDir, State &state, Options &options,  Sampler &sampler, Indexer &indexer, bool islastbatch, shared_ptr<map<string, vector<string>>> chunkFiletoPathMap) {
+    shared_ptr<Chunks> doIndexing(string chunksDir, State &state, Options &options,  Sampler &sampler, Indexer &indexer, bool islastbatch) {
 
         cout << endl;
         cout << "=======================================" << endl;
@@ -1988,18 +1654,12 @@ namespace indexer {
         state.bytesProcessed = 0;
         state.duration = 0;
 
-        indexer.writer->launch();
+        if (options.concatOutput)
+            indexer.writer->launch();
 
-        auto chunks = getChunks(chunksDir, chunkFiletoPathMap);
-        MPI_Barrier(MPI_COMM_WORLD);
+        auto chunks = getChunks(chunksDir);
 
         auto attributes = chunks->attributes;
-        //--------------------MPI-------------------
-        // sort the chunks in increasing order to distribute to multiple tasks
-        auto parallel = std::execution::par_unseq;
-        sort(parallel, chunks->list.begin(), chunks->list.end(),
-             [](shared_ptr<Chunk> a, shared_ptr<Chunk> b) { return a->numPoints > b->numPoints; });
-        //-------------------MPI--------------
         indexer.options = options;
         indexer.attributes = attributes;
         //indexer.root = make_shared<Node>("r", chunks->min, chunks->max);
@@ -2026,10 +1686,7 @@ namespace indexer {
         int64_t totalPoints = 0;
         int64_t totalBytes = 0;
         for (auto chunk: chunks->list) {
-            int64_t filesize = 0;
-            for (auto file : chunk->files) {
-                filesize += fs::file_size(file);
-            }
+            int64_t filesize = fs::file_size(chunk->file);
             totalPoints += filesize / attributes.bytes;
             totalBytes += filesize;
             // add chunk root, provided it isn't the root.
@@ -2066,11 +1723,7 @@ namespace indexer {
                                 indexer.waitUntilWriterBacklogBelow(1'000);
                                 activeThreads++;
 
-                                int64_t filesize = 0;
-                                for (auto file : chunk->files) {
-                                    filesize += fs::file_size(file);
-                                }
-
+                                int64_t filesize = fs::file_size(chunk->file);
                                 stringstream msg;
                                 msg << "start indexing chunk " + chunk->id << "\n";
                                 msg << "filesize: " << formatNumber(filesize) << "\n";
@@ -2081,14 +1734,12 @@ namespace indexer {
 
                                 indexer.bytesInMemory += filesize;
                                 RECORD_TIMINGS_START(recordTimings::Machine::cpu, "readBinaryFile time in indexing");
-                                auto pointBuffer = readBinaryFile(chunk->files);
+                                auto pointBuffer = readBinaryFile(chunk->file);
                                 RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "readBinaryFile time in indexing");
                                 auto tStartChunking = now();
 
                                 if (!options.keepChunks) {
-                                    for (auto file : chunk->files) {
-                                        fs::remove(file);
-                                    }
+                                    fs::remove(chunk->file);
                                 }
 
                                 int64_t numPoints = pointBuffer->size / bpp;
@@ -2112,10 +1763,10 @@ namespace indexer {
                                 indexer.flushChunkRoot(chunkRoot);
                                 RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "flushChunkRoot time in indexing");
                                 // Moved out of the task to enable MPI parallelism.
-                                /*// add chunk root, provided it isn't the root.
+                                // add chunk root, provided it isn't the root.
                                 if (chunkRoot->name.size() > 1) {
                                     indexer.root->addDescendant(chunkRoot);
-                                }*/
+                                }
 
                                 lock_guard<mutex> lock(mtx_nodes);
 
@@ -2126,133 +1777,30 @@ namespace indexer {
 
                                 activeThreads--;
                             });
-        /*for (auto chunk : chunks->list) {
+        for (auto chunk : chunks->list) {
             auto task = make_shared<Task>(chunk);
             pool.addTask(task);
-        }*/
+        }
         RECORD_TIMINGS_PARALLEL();
         auto tStartIndexing = now();
-        vector<shared_ptr<Task>> tasks;
-        for (auto chunk: chunks->list) {
-            auto task = make_shared<Task>(chunk);
-            if (task->chunkRootNode->name.size() > 1) {
-                indexer.root->addDescendant(task->chunkRootNode);
-            }
-            task->index = tasks.size();
-            tasks.push_back(task);
-        }
-        indexer.totalChunks += tasks.size();
-        int n_chunks = 0;
-        for (int i = process_id; i < tasks.size(); i += n_processes) {
-            n_chunks++;
-        }
-        cout << "Process " << process_id << " has " << n_chunks  << endl;
-        for (int i = process_id; i < tasks.size(); i += n_processes) {
-            pool.addTask(tasks[i]);
-        }
-        if (process_id == ROOT) {
-            indexer.rcvflushedChunkRoot();
-        }
+
 
         pool.waitTillEmpty();
         pool.close();
 
 
 
-        if (process_id != ROOT) {
-
-            indexer.sendCRdone();
-        }
-
-
-
-        cout << "Process " << process_id << " taskpool finished." << endl;
-        cout.flush();
-
-
-
-        MPI_Bcast(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, ROOT, MPI_COMM_WORLD);
-
-
-        /*if(process_id == ROOT) {
-            for (int i = 0; i < n_processes; i++) {
-                if (i != ROOT) {
-                    MPI_Send(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, i, 30, MPI_COMM_WORLD);
-                }
-            }
-        } else {
-            MPI_Recv(&indexer.currentTotalOctreeFileSize, 1, MPI_INT64_T, ROOT, 30, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }*/
-
-        indexer.processOctreeFileOffset = indexer.currentTotalOctreeFileSize;
-
-        for (int i = process_id - 1; i >= 0; i--) {
-            MPI_Request sendOffsetRequest = MPI_REQUEST_NULL;
-            MPI_Isend(&indexer.octreeFileSize, 1, MPI_INT64_T, i, 20, MPI_COMM_WORLD, &sendOffsetRequest);
-        }
-
-        int64_t offset[n_processes - process_id - 1];
-        MPI_Request recvOffsetRequest[n_processes - process_id - 1];
-        for (int i = process_id + 1; i < n_processes; i++) {
-            MPI_Irecv(&offset[i - process_id - 1], 1, MPI_INT64_T, i, 20, MPI_COMM_WORLD,
-                      &recvOffsetRequest[i - process_id - 1]);
-        }
-        MPI_Waitall(n_processes - process_id - 1, recvOffsetRequest, MPI_STATUSES_IGNORE);
-
-        //int64_t totalOctreeFileOffset = 0;
-
-        for (int i = process_id + 1; i < n_processes; i++) {
-            indexer.processOctreeFileOffset += offset[i - process_id - 1];
-            cout << "Process " << process_id << " received offset " << offset[i - process_id - 1] << " from process " << i
-                 << endl;
-        }
-
-        if (process_id ==ROOT){
-            indexer.currentTotalOctreeFileSize += indexer.processOctreeFileOffset + indexer.octreeFileSize;
-        }
-
-        indexer.hierarchyFlusher->flush(hierarchyStepSize, indexer.processOctreeFileOffset);
-
-        if(!islastbatch){
+        if(!islastbatch &&  options.concatOutput) {
             indexer.writer->closeAndWait();
-            indexer.byteOffset = 0;
-            indexer.octreeFileSize = 0;
-            indexer.fcrMPIsend = nullptr;
+
         }
-        else {
 
-            if(process_id == ROOT) {
-                for (int i = 0; i < n_processes; i++) {
-                    if (i != ROOT) {
-                        int64_t octreeDepth;
-                        MPI_Recv(&octreeDepth, 1, MPI_INT64_T, i, 30, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                        if (octreeDepth > indexer.octreeDepth) {
-                            indexer.octreeDepth = octreeDepth;
-                        }
-                    }
-                }
-            } else {
-                MPI_Send(&indexer.octreeDepth, 1, MPI_INT64_T, ROOT, 30, MPI_COMM_WORLD);
-                indexer.writer->closeAndWait();
-            }
-
+        if (islastbatch)
             indexer.fChunkRoots.close();
-            cout << "Total chunks processed by process " << process_id << " is " << indexer.totalChunks << endl;
-            cout << "Total chunk roots in the flushChunkRoots vector of task " << process_id << " is " << indexer.flushedChunkRoots.size() << endl;
-            if (process_id == ROOT){
-                indexer.MPISendRcvlog << "The flushed chunkroots receive by ROOT are: " << endl;
-                int i = 0;
-                for(auto fcr: indexer.flushedChunkRoots){
-                    if (fcr.taskID != ROOT)
-                        indexer.MPISendRcvlog << "Flushed chunkroot " << i++ << " is: " << endl;
-                        indexer.MPISendRcvlog << fcr << endl;
-                }
-            }
-        }
 
 
 
-        printElapsedTime("Indexing completed by process " + std::to_string(process_id) + " in", tStartIndexing);
+        printElapsedTime("Indexing completed by process in ", tStartIndexing);
 
 //            if (!options.keepChunks) {
 //                /*for (int i = process_id; i < tasks.size(); i += n_processes) {
@@ -2289,7 +1837,7 @@ namespace indexer {
 
 
 
-            //string tmpChunkRootsPath = targetDir + "/tmpChunkRoots.bin";
+            string tmpChunkRootsPath = targetDir + "/tmpChunkRoots.bin";
             auto tasks = indexer.processChunkRoots();
 
 
@@ -2297,7 +1845,6 @@ namespace indexer {
 
                 for (auto &fcr: task.fcrs) {
                     auto buffer = make_shared<Buffer>(fcr.size);
-                    string tmpChunkRootsPath = targetDir + "/tmpChunkRoots_" + std::to_string(fcr.taskID) + ".bin";
                     readBinaryFile(tmpChunkRootsPath, fcr.offset, fcr.size, buffer->data);
 
                     fcr.node->points = buffer;
@@ -2351,20 +1898,16 @@ namespace indexer {
         string metadata = indexer.createMetadata(options, state, hierarchy);
         writeFile(metadataPath, metadata);
 
-       for (int i = 0 ; i < n_processes; i++) {
-            string chunksMetadataPath = targetDir + "/chunks_" + std::to_string(i) + "/metadata.json";
+        string chunksMetadataPath = targetDir + "/chunks/metadata.json";
 
-            fs::remove(chunksMetadataPath);//string hierarchyPath = targetDir + "/hierarchy.bin";
+        fs::remove(chunksMetadataPath);//string hierarchyPath = targetDir + "/hierarchy.bin";
 
         // remove chunks directory
-            fs::remove(targetDir + "/chunks_" + std::to_string(i));
-       }
+        fs::remove(targetDir + "/chunks" );
 
         //delete tmpChunkRoots files
-        for (int i = 0; i < n_processes; i++) {
-            string tmpChunkRootsPath = targetDir + "/tmpChunkRoots_" + std::to_string(i) + ".bin";
-            fs::remove(tmpChunkRootsPath);
-        }
+        string tmpChunkRootsPath = targetDir + "/tmpChunkRoots.bin";
+        fs::remove(tmpChunkRootsPath);
 
 
     }

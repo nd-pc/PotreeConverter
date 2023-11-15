@@ -104,8 +104,4 @@ void error(string msg, string file, int line) {
 }
 
 
-std::ofstream& getLogFile() {
-        *fout;
-}
-
 }

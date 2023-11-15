@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_SUPPRESS_REGENERATION true)
 
-project(PotreeConverterMPI LANGUAGES CXX)
+project(PotreeConverter LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
@@ -9,7 +9,7 @@ set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
 
 
 
-set(target PotreeConverterMPI)
+set(target PotreeConverter)
 
 #message(${PROJECT_SOURCE_DIR})
 
@@ -30,8 +30,7 @@ set(HEADER_FILES
 	./Converter/include/logger.h
 	./Converter/modules/LasLoader/LasLoader.h
 	./Converter/modules/unsuck/unsuck.hpp
-		./Converter/include/record_timings.hpp
-		./Converter/include/MPIcommon.h)
+		./Converter/include/record_timings.hpp)
 
 add_executable(${target}
 		./Converter/src/chunker_countsort_laszip.cpp
@@ -64,20 +63,11 @@ if (UNIX)
 	find_package(Threads REQUIRED)
 	find_package(TBB REQUIRED)
 
-	find_package(MPI REQUIRED)
 	
 	target_link_libraries(${PROJECT_NAME} Threads::Threads)
 	target_link_libraries(${PROJECT_NAME} tbb)
-	target_include_directories(${target} PRIVATE ${MPI_CXX_INCLUDE_PATH})
-	target_link_libraries(${target} ${MPI_CXX_LIBRARIES})
-	target_link_libraries(${target} ${MPI_CXX_LINK_FLAGS})
-	target_compile_options(${target} PRIVATE ${MPI_CXX_COMPILE_FLAGS})
-	#target_compile_definitions(${target} PRIVATE OMPI_SKIP_MPICXX)
-	target_compile_definitions(${target} PRIVATE MPI_CXX_SKIP_MPICXX)
 	target_compile_options(${target} PRIVATE -g)
 
-else()
-	message(FATAL_ERROR "This is PotreeConverter MPI implementation. Currently it only supports UNIX clusters")
 
 	#SET(CMAKE_CXX_FLAGS "-pthread -ltbb")
 endif (UNIX)
@@ -120,7 +110,7 @@ add_custom_command(
 		$<TARGET_FILE_DIR:${PROJECT_NAME}>/licenses/license_potree_converter.txt)
 
 add_custom_command(
-	TARGET PotreeConverterMPI POST_BUILD
+	TARGET PotreeConverter POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy
 		${PROJECT_SOURCE_DIR}/README.md
 		$<TARGET_FILE_DIR:${PROJECT_NAME}>/README.md)

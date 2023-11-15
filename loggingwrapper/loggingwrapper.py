@@ -1,59 +1,55 @@
 
 import logging
-from logging.handlers import RotatingFileHandler
 
 
 class LoggingWrapper:
-    def __init__(self, logFile):
-        self.BLUE = '\033[94m'
-        self.GREEN = '\033[92m'
-        self.YELLOW = '\033[93m'
-        self.RED = '\033[91m'
-        self.BOLD = '\033[1m'
-        self.ENDC = '\033[0m'
-        self.logFile = logFile
 
-        self.log_formatter = logging.Formatter('%(asctime)s - %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M')
-        self.logger = logging.getLogger('logger')
-        self.logger.setLevel(logging.DEBUG)
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    ENDC = '\033[0m'
 
-        # Console handler
-        self.console_handler = logging.StreamHandler()
-        self.console_handler.setFormatter(self.log_formatter)
-        self.logger.addHandler(self.console_handler)
+    log_formatter = logging.Formatter('%(asctime)s - %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M')
+    logger = logging.getLogger('logger')
+    logger.setLevel(logging.DEBUG)
 
-        # File handler
-        self.file_handler = RotatingFileHandler(self.logFile, mode='a', maxBytes=5 * 1024 * 1024, backupCount=2,
-                                                encoding=None, delay=False)
-        self.file_handler.setFormatter(self.log_formatter)
-        self.logger.addHandler(self.file_handler)
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_formatter)
+    logger.addHandler(console_handler)
 
-    def colors(self, color):
+    @staticmethod
+    def colors(color):
         if color == "blue":
-            return self.BLUE
+            return LoggingWrapper.BLUE
         elif color == "green":
-            return self.GREEN
+            return LoggingWrapper.GREEN
         elif color == "yellow":
-            return self.YELLOW
+            return LoggingWrapper.YELLOW
         elif color == "red":
-            return self.RED
+            return LoggingWrapper.RED
         else:
             return ""
 
-    def info(self, text, color = "",  bold = False):
+    @staticmethod
+    def info(text, color = "",  bold = False):
         if bold:
-            self.logger.info(self.colors(color) + self.BOLD + text + "\n" + self.ENDC)
+            LoggingWrapper.logger.info(LoggingWrapper.colors(color) + LoggingWrapper.BOLD + text + "\n" + LoggingWrapper.ENDC)
         else:
-            self.logger.info(self.colors(color) + text + "\n" + self.ENDC)
+            LoggingWrapper.logger.info(LoggingWrapper.colors(color) + text + "\n" + LoggingWrapper.ENDC)
 
-    def error(self, text, color ="red", bold = False):
+    @staticmethod
+    def error(text, color ="red", bold = False):
         if bold:
-            self.logger.error(self.colors(color)+ self.BOLD + text + "\n" + self.ENDC)
+            LoggingWrapper.logger.error(LoggingWrapper.colors(color)+ LoggingWrapper.BOLD + text + "\n" + LoggingWrapper.ENDC)
         else:
-            self.logger.error(self.colors(color) + text + "\n" + self.ENDC)
+            LoggingWrapper.logger.error(LoggingWrapper.colors(color) + text + "\n" + LoggingWrapper.ENDC)
 
-    def warning(self, text, color = "yellow", bold = False):
+    @staticmethod
+    def warning(text, color = "yellow", bold = False):
         if bold:
-            self.logger.warning(self.colors(color) + self.BOLD + text + "\n" + self.ENDC)
+            LoggingWrapper.logger.warning(LoggingWrapper.colors(color) + LoggingWrapper.BOLD + text + "\n" + LoggingWrapper.ENDC)
         else:
-            self.logger.warning(self.colors(color) + text + "\n" +  self.ENDC)
+            LoggingWrapper.logger.warning(LoggingWrapper.colors(color) + text + "\n" +  LoggingWrapper.ENDC)

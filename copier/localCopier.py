@@ -3,6 +3,7 @@ import subprocess
 import time
 from pathlib import Path
 from copier import Copier
+from loggingwrapper import LoggingWrapper
 
 NAME_MAX = 255
 PATH_MAX = 4096
@@ -12,12 +13,12 @@ class LocalCopier(Copier):
         if batchNum in self.batchDict:
             if self.batchDict[batchNum]["files"] != []:
                 self.removeFiles(self.batchDict[batchNum]["files"])
-                self.logger.info("Removed batch-" + str(batchNum) + "/partition-" + self.batchDict[batchNum]["partition"] + " from " + self.batchDict[batchNum]["destdir"])
+                LoggingWrapper.info("Removed batch-" + str(batchNum) + "/partition-" + self.batchDict[batchNum]["partition"] + " from " + self.batchDict[batchNum]["destdir"])
                 size = self.batchDict[batchNum]["size"]
                 self.totalSize -= self.storageUtilizationFactor * size #update the total size
             del self.batchDict[batchNum]
         else:
-            self.logger.error("Error: batch number " + str(batchNum) + " does not exist")
+            LoggingWrapper.error("Error: batch number " + str(batchNum) + " does not exist")
             exit(1)
 
             #remove the batch from the dictionary
@@ -57,7 +58,7 @@ class LocalCopier(Copier):
             rmCmd = shutil.which("rm") + " " + " ".join(subset)
             rmCmdStatus = subprocess.run(rmCmd, shell=True, capture_output=True, encoding="utf-8")
             if rmCmdStatus.returncode != 0:
-                self.logger.error("Error removing file: " + rmCmdStatus.stderr)
+                LoggingWrapper.error("Error removing file: " + rmCmdStatus.stderr)
                 exit(1)
 
 
@@ -71,7 +72,7 @@ class LocalCopier(Copier):
             copyTime = time.time() - startCopyTime
             self.totalCopyTime += copyTime
             self.totalSize += self.storageUtilizationFactor * size
-            self.logger.info("Copied batch-" + str(self.batchCopied) + "/partition-" + partition +  " to " + destination + ", size: "  + str(size/(1024**3)) + " gigabytes, " + "time: " + str(copyTime) + ", copying throughput: " + str((size / copyTime) / (1024**2)) + " MB/s")#: " + ",".join(map(lambda x: Path(x).name, filesToCopy.split())))
+            LoggingWrapper.info("Copied batch-" + str(self.batchCopied) + "/partition-" + partition +  " to " + destination + ", size: "  + str(size/(1024**3)) + " gigabytes, " + "time: " + str(copyTime) + ", copying throughput: " + str((size / copyTime) / (1024**2)) + " MB/s")#: " + ",".join(map(lambda x: Path(x).name, filesToCopy.split())))
         self.batchCopied += 1
     def copyFiles(self, filesToCopy, destination):
         subsets = self.filesSubsets(filesToCopy, NAME_MAX, PATH_MAX)
@@ -79,7 +80,7 @@ class LocalCopier(Copier):
             copyCmd = shutil.which("cp") + " " + " ".join(subset) + " " + destination
             copyCmdStatus = subprocess.run(copyCmd, shell=True, capture_output=True, encoding="utf-8")
             if copyCmdStatus.returncode != 0:
-                self.logger.error("Error copying files: " + copyCmdStatus.stderr)
+                LoggingWrapper.error("Error copying files: " + copyCmdStatus.stderr)
                 exit(1)
 
     def concatFiles(self, filesToConcat, destination):
@@ -89,7 +90,7 @@ class LocalCopier(Copier):
         concatTime = time.time() - startConcatTime
         size = sum(map(lambda x: Path(x).stat().st_size, filesToConcat))
         if concatCmdStatus.returncode != 0:
-            self.logger.error("Error concatenating files: " + concatCmdStatus.stderr)
+            LoggingWrapper.error("Error concatenating files: " + concatCmdStatus.stderr)
             exit(1)
-        self.logger.info("Files: " + ",".join(filesToConcat) + " concatenated to " + destination + ", size:" + str(size/(1024**3)) + " gigabytes, time: " + str(concatTime) + ", concatenating throughput: " + str((size / concatTime) / (1024**2)) + " MB/s")
+        LoggingWrapper.info("Files: " + ",".join(filesToConcat) + " concatenated to " + destination + ", size:" + str(size/(1024**3)) + " gigabytes, time: " + str(concatTime) + ", concatenating throughput: " + str((size / concatTime) / (1024**2)) + " MB/s")
 

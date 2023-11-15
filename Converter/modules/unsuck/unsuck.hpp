@@ -384,24 +384,16 @@ inline string readTextFile(string path) {
 // 	return buffer;
 // }
 
+inline shared_ptr<Buffer> readBinaryFile(string path) {
 
+	auto file = fopen(path.c_str(), "rb");
+	auto size = fs::file_size(path);
 
-inline shared_ptr<Buffer> readBinaryFile(vector<string> &paths) {
+	//vector<uint8_t> buffer(size);
+	auto buffer = make_shared<Buffer>(size);
 
-    int64_t size = 0;
-    for (auto &path : paths) {
-        size += fs::file_size(path);
-    }
-    auto buffer = make_shared<Buffer>(size);
-    int64_t offset = 0;
-    for (auto &path : paths) {
-        auto file = fopen(path.c_str(), "rb");
-        fread((uint8_t*) buffer->data  +  offset, 1, fs::file_size(path), file);
-        offset += fs::file_size(path);
-        fclose(file);
-    }
-
-
+	fread(buffer->data, 1, size, file);
+	fclose(file);
 
 	return buffer;
 }

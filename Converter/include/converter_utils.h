@@ -264,5 +264,6 @@ struct Options {
 	bool keepChunks = false;
 	bool noChunking = false;
 	bool noIndexing = false;
+    bool concatOutput = false;
 
 };

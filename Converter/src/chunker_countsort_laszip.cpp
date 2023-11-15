@@ -19,7 +19,6 @@
 #include "logger.h"
 #include "record_timings.hpp"
 
-#include "MPIcommon.h"
 
 using json = nlohmann::json;
 
@@ -429,120 +428,7 @@ namespace chunker_countsort_laszip {
 
     }
 
-    // Serialization function for Vector3
-    void serializeVector3(const Vector3& vec, vector<uint8_t> &buffer) {
-        std::vector<uint8_t> temp(sizeof(vec));
-        std::memcpy(temp.data(), &vec, sizeof(vec));
-        buffer.insert(buffer.end(), temp.begin(), temp.end());
 
-    }
-
-
-    // Deserialization function for Vector3
-    Vector3 deserializeVector3(const std::vector<uint8_t>& buffer) {
-        if (buffer.size() != sizeof(Vector3)) {
-            // Handle error: The buffer size should match the size of Vector3
-            // You can throw an exception or return a default value as needed.
-        }
-
-        Vector3 vec;
-        std::memcpy(&vec, buffer.data(), sizeof(vec));
-        return vec;
-    }
-
-// Serialize an Attribute object into a byte stream
-    std::vector<uint8_t> serializeAttribute(const Attribute& attr) {
-        std::vector<uint8_t> buffer;
-
-        // Serialize each member of the Attribute struct
-
-
-        // Serialize strings
-        int nameSize = attr.name.size();
-        buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&nameSize), reinterpret_cast<uint8_t*>(&nameSize) + sizeof(int));
-        buffer.insert(buffer.end(), attr.name.c_str(), attr.name.c_str() + nameSize);
-
-        // Serialize description
-        int descriptionSize = attr.description.size();
-        buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&descriptionSize), reinterpret_cast<uint8_t*>(&descriptionSize) + sizeof(int));
-        buffer.insert(buffer.end(), attr.description.c_str(), attr.description.c_str() + descriptionSize);
-
-
-        // Serialize integers and enums
-        buffer.insert(buffer.end(), reinterpret_cast<const uint8_t*>(&attr.size), reinterpret_cast<const uint8_t*>(&attr.size) + sizeof(int));
-        buffer.insert(buffer.end(), reinterpret_cast<const uint8_t*>(&attr.numElements), reinterpret_cast<const uint8_t*>(&attr.numElements) + sizeof(int));
-        buffer.insert(buffer.end(), reinterpret_cast<const uint8_t*>(&attr.elementSize), reinterpret_cast<const uint8_t*>(&attr.elementSize) + sizeof(int));
-        buffer.insert(buffer.end(), reinterpret_cast<const uint8_t*>(&attr.type), reinterpret_cast<const uint8_t*>(&attr.type) + sizeof(int));
-
-        // Serialize Vector3
-        serializeVector3(attr.min, buffer);
-        serializeVector3(attr.max, buffer);
-        serializeVector3(attr.scale, buffer);
-        serializeVector3(attr.offset, buffer);
-
-        // Serialize histogram (assuming histogram is a vector of int64_t)
-         int histSize = attr.histogram.size();
-         buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&histSize), reinterpret_cast<uint8_t*>(&histSize) + sizeof(int));
-         buffer.insert(buffer.end(), reinterpret_cast<const uint8_t*>(attr.histogram.data()), reinterpret_cast<const uint8_t*>(attr.histogram.data() + histSize * sizeof(int64_t)));
-
-        return buffer;
-    }
-
-// Deserialize a byte stream into an Attribute object
-    Attribute deserializeAttribute(const std::vector<uint8_t>& buffer) {
-        Attribute attr;
-
-        // Deserialize each member of the Attribute struct
-        size_t offset = 0;
-
-        // Deserialize strings
-        int nameSize;
-        std::memcpy(&nameSize, buffer.data() + offset, sizeof(int));
-        offset += sizeof(int);
-
-        attr.name.resize(nameSize);
-        std::memcpy(&attr.name[0], buffer.data() + offset, nameSize);
-        offset += nameSize;
-
-        // Deserialize description
-        int descriptionSize;
-        std::memcpy(&descriptionSize, buffer.data() + offset, sizeof(int));
-        offset += sizeof(int);
-
-        attr.description.resize(descriptionSize);
-        std::memcpy(&attr.description[0], buffer.data() + offset, descriptionSize);
-        offset += descriptionSize;
-
-
-        // Deserialize integers and enums
-        std::memcpy(&attr.size, buffer.data() + offset, sizeof(int));
-        offset += sizeof(int);
-        std::memcpy(&attr.numElements, buffer.data() + offset, sizeof(int));
-        offset += sizeof(int);
-        std::memcpy(&attr.elementSize, buffer.data() + offset, sizeof(int));
-        offset += sizeof(int);
-        std::memcpy(&attr.type, buffer.data() + offset, sizeof(int));
-        offset += sizeof(int);
-
-        // Deserialize Vector3 (assuming Vector3 has a proper deserialization function)
-         attr.min = deserializeVector3(std::vector<uint8_t>(buffer.data() + offset, buffer.data() + offset + sizeof(Vector3)));
-         offset += sizeof(Vector3);
-         attr.max = deserializeVector3(std::vector<uint8_t>(buffer.data() + offset, buffer.data() + offset + sizeof(Vector3)));
-         offset += sizeof(Vector3);
-         attr.scale = deserializeVector3(std::vector<uint8_t>(buffer.data() + offset, buffer.data() + offset + sizeof(Vector3)));
-         offset += sizeof(Vector3);
-         attr.offset = deserializeVector3(std::vector<uint8_t>(buffer.data() + offset, buffer.data() + offset + sizeof(Vector3)));
-         offset += sizeof(Vector3);
-
-         // Deserialize histogram (assuming histogram is a vector of int64_t)
-         int histSize;
-         std::memcpy(&histSize, buffer.data() + offset, sizeof(int));
-         offset += sizeof(int);
-         attr.histogram.resize(histSize);
-         std::memcpy(attr.histogram.data(), buffer.data() + offset, histSize * sizeof(int64_t));
-
-        return attr;
-    }
 
     void countPointsInCells(vector<Source> &sources, Vector3 min, Vector3 max, vector<std::atomic_int32_t>& grid, int64_t gridSize, State& state, Attributes& outputAttributes, Monitor* monitor) {
 
@@ -855,7 +741,7 @@ namespace chunker_countsort_laszip {
                 task->inputAttributes = inputAttributes;
 
                 // there are numProcessors in the pool
-				//pool.addTask(task);
+				pool.addTask(task);
                 tasks.push_back(task);
 
 				numRead += thread_batchSize;
@@ -866,13 +752,6 @@ namespace chunker_countsort_laszip {
 		}
 
 
-        //auto parallel = std::execution::par_unseq;
-        //sort(parallel, tasks.begin(), tasks.end(),
-          //   [](shared_ptr<Task> a, shared_ptr<Task> b) { return a->numPoints > b->numPoints; });
-        unsigned int tasks_per_node = tasks.size() / n_processes ? (tasks.size() / n_processes) + 1 :tasks.size() / n_processes;
-        for (int i = process_id * tasks_per_node; i < (process_id + 1) * tasks_per_node && i < tasks.size(); i++) {
-            pool.addTask(tasks[i]);
-        }
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting for creating tasks")
         //for (int i = process_id; i < tasks.size(); i += n_processes) {
          //   pool.addTask(tasks[i]);
@@ -1255,7 +1134,7 @@ namespace chunker_countsort_laszip {
 				task->inputAttributes = inputAttributes;
 
                  tasks.push_back(task);
-				//pool.addTask(task);
+				pool.addTask(task);
 
 				numRead += numToRead;
 			}
@@ -1265,17 +1144,6 @@ namespace chunker_countsort_laszip {
 
 		}
 
-        /*auto parallel = std::execution::par_unseq;
-        sort(parallel, tasks.begin(), tasks.end(),
-             [](shared_ptr<Task> a, shared_ptr<Task> b) { return a->batchSize > b->batchSize; });
-
-        for (int i = process_id; i < tasks.size(); i += n_processes) {
-            pool.addTask(tasks[i]);
-        }*/
-        unsigned int tasks_per_node = tasks.size() / n_processes ? (tasks.size() / n_processes) + 1 :tasks.size() / n_processes;
-        for (int i = process_id * tasks_per_node; i < (process_id + 1) * tasks_per_node && i < tasks.size(); i++) {
-            pool.addTask(tasks[i]);
-        }
 
         //printElapsedTime("tStartTaskAssembly", tStartTaskAssembly);
 
@@ -1503,45 +1371,7 @@ namespace chunker_countsort_laszip {
     // Find global min/max for the attributes
 
 
-    void findGlobalAttrMinMax(Attributes& outputAttributes){
 
-        //outputAttributes.print(cout);
-        for (int i = 0; i < outputAttributes.list.size(); i++) {
-            std::vector<uint8_t> serializedAttribute = serializeAttribute(outputAttributes.list[i]);
-            // Allocate memory for receiving the serialized data from other ranks
-            std::vector<uint8_t> receivedData(serializedAttribute.size() * n_processes);
-
-            MPI_Allgather(serializedAttribute.data(), serializedAttribute.size(), MPI_BYTE,
-                          receivedData.data(), serializedAttribute.size(), MPI_BYTE, MPI_COMM_WORLD);
-            // Use MPI_Alltoall to exchange the serialized data
-            //MPI_Alltoall(serializedAttribute.data(), serializedAttribute.size(), MPI_BYTE,
-            //receivedData.data(), serializedAttribute.size(), MPI_BYTE, MPI_COMM_WORLD);
-
-            for (int j = 0; j < n_processes; j++) {
-                if (j == process_id)
-                    continue;
-                Attribute source = deserializeAttribute(std::vector<uint8_t>(receivedData.data() + j * serializedAttribute.size(),
-                                                                             receivedData.data() + (j + 1) *
-                                                                                                   serializedAttribute.size()));  // deserialize the received data
-                Attribute &target = outputAttributes.list[i];
-
-                target.min.x = std::min(target.min.x, source.min.x);
-                target.min.y = std::min(target.min.y, source.min.y);
-                target.min.z = std::min(target.min.z, source.min.z);
-
-                target.max.x = std::max(target.max.x, source.max.x);
-                target.max.y = std::max(target.max.y, source.max.y);
-                target.max.z = std::max(target.max.z, source.max.z);
-
-                // target.mask = target.mask | source.mask;
-
-                for (int k = 0; k < target.histogram.size(); k++) {
-                    target.histogram[k] = target.histogram[k] + source.histogram[k];
-                }
-            }
-        }
-
-    }
 
 	NodeLUT doCounting(Vector3 min, Vector3 max, State& state, string targetDir, Attributes &outputAttributes, Monitor* monitor) {
 
@@ -1566,13 +1396,12 @@ namespace chunker_countsort_laszip {
 
         int batchNum = 0;
         bool isLastBatch = false;
-        if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
-        if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
         while (!fs::exists(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
-        MPI_Barrier(MPI_COMM_WORLD);
-        if (process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting");
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting");
         int totalFilesCounted = 0;
         while (!isLastBatch) {
             // cout << "waiting for file" << endl;
@@ -1621,75 +1450,42 @@ namespace chunker_countsort_laszip {
 
 
 
-            if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total counting time");
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total counting time");
             auto tStart = now();
             countPointsInCells(sources, min, max, grid, gridSize,
                                state,
                                outputAttributes, monitor);
-            MPI_Barrier(MPI_COMM_WORLD);
             auto duration = now() - tStart;
-            if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total counting time");
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total counting time");
             totalFilesCounted += sources.size();
-            if (process_id == ROOT) {
-                fstream signalToCopier;
-                signalToCopier.open(
-                        targetDir + "/counting_done_signals/batchno_" + to_string(batchNum) + "_counting_done",
+            fstream signalToCopier;
+            signalToCopier.open(
+                    targetDir + "/counting_done_signals/batchno_" + to_string(batchNum) + "_counting_done",
+                    ios::out);
+            signalToCopier << to_string(duration);//<< "\n" << "msgcomplete";
+            signalToCopier.close();
+            {
+                fstream().open(
+                        targetDir + "/counting_done_signals/batchno_" + to_string(batchNum) + "_counting" +
+                        "_time_written",
                         ios::out);
-                signalToCopier << to_string(duration);//<< "\n" << "msgcomplete";
-                signalToCopier.close();
-                {
-                    fstream().open(
-                            targetDir + "/counting_done_signals/batchno_" + to_string(batchNum) + "_counting" +
-                            "_time_written",
-                            ios::out);
-                }
             }
             batchNum++;
-            if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting")
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting")
             while (!fs::exists(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
                 if (isLastBatch)
                     break;
                 else
                     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             }
-            if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting")
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting")
 
         }
-        MPI_Barrier(MPI_COMM_WORLD);
         cout << "Done counting" << endl;
-        flush(cout);
-        if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu,  "Total time spent in counting including waiting for copying");
-        cout << "Summing up counting grids of all MPI processes..." << endl;
-        flush(cout);
-        if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in summing up the counting grids of all MPI processes");
-        // Temporary buffer with compatible data type (int)
-        std::vector<int> tempBuffer(grid.size());
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu,  "Total time spent in counting including waiting for copying");
 
-        // Copy data from std::atomic_int32_t to int
-        for (size_t i = 0; i < grid.size(); ++i) {
-            tempBuffer[i] = grid[i].load();
-        }
 
-        // Perform MPI_Allreduce with the temporary buffer
-        MPI_Allreduce(MPI_IN_PLACE, tempBuffer.data(), grid.size(), MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-
-        // Copy the result back to std::atomic_int32_t
-        for (size_t i = 0; i < grid.size(); ++i) {
-            grid[i].store(tempBuffer[i]);
-        }
-        if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total time spent in summing up the counting grids of all MPI processes");
-        cout << "Done summing up counting grids of all MPI processes" << endl;
-        flush(cout);
-        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in finding global min/max for the attributes")
-        cout << "Finding global min/max for the attributes..." << endl;
-        flush(cout);
-        findGlobalAttrMinMax(outputAttributes);
-        cout << "Done finding global min/max for the attributes" << endl;
-        flush(cout);
-        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in finding global min/max for the attributes")
-        //MPI_Barrier(MPI_COMM_WORLD);
-
-        string metadataPath = targetDir + "/chunks_" + to_string(process_id) + "/metadata.json";
+        string metadataPath = targetDir + "/chunks/metadata.json";
         double cubeSize = ceil((max - min).max());
         Vector3 size = {cubeSize, cubeSize, cubeSize};
         max = min + cubeSize;

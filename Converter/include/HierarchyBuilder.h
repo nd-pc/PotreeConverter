@@ -63,7 +63,7 @@ struct HierarchyBuilder{
 
 	struct HBatch{
 		string name;
-		vector<string> path;
+		string path;
 		int numNodes = 0;
 		int64_t byteSize = 0;
 		vector<shared_ptr<HNode>> nodes;
@@ -79,18 +79,14 @@ struct HierarchyBuilder{
 		this->hierarchyStepSize = hierarchyStepSize;
 	}
 
-	shared_ptr<HBatch> loadBatch(vector<string> &paths){
+	shared_ptr<HBatch> loadBatch(string path){
 
-		shared_ptr<Buffer> buffer = readBinaryFile(paths);
+		shared_ptr<Buffer> buffer = readBinaryFile(path);
+
 		auto batch = make_shared<HBatch>();
-        for (auto &path : paths){
-            batch->path.push_back(path);
-        }
-        batch->numNodes = buffer->size / 48;
-
-
-		batch->name = fs::path(paths[0]).stem().string();
-
+		batch->path = path;
+		batch->name = fs::path(path).stem().string();
+		batch->numNodes = buffer->size / 48;
 
 		// group this batch in chunks of <hierarchyStepSize>
 		for(int i = 0; i < batch->numNodes; i++){
@@ -285,27 +281,13 @@ struct HierarchyBuilder{
 		return buffer;
 	}
 
-
-
 	void build(){
 
 		string hierarchyFilePath = path + "/../hierarchy.bin";
 		fstream fout(hierarchyFilePath, ios::binary | ios::out);
 		int64_t bytesWritten = 0;
 
-
-        map<string, vector<string>> hierarchyFiletoPathMap;
-        for (int i = 0; i < n_processes; i++) {
-            for (auto& entry : fs::directory_iterator(path + "/" + "hierarchyChunks_" + to_string(i))) {
-                auto filepath = entry.path();
-                if (iEndsWith(filepath.string(), ".bin")) {
-                    hierarchyFiletoPathMap[filepath.filename().string()].push_back(filepath.string());
-                }
-            }
-        }
-
-
-		auto batch_root = loadBatch(hierarchyFiletoPathMap["r.bin"]);
+		auto batch_root = loadBatch(path + "/r.bin");
 		this->batch_root = batch_root;
 
 		{ // reserve the first <x> bytes in the file for the root chunk
@@ -317,16 +299,16 @@ struct HierarchyBuilder{
 
 		// now write all hierarchy batches, except root
 		// update proxy nodes in root with byteOffsets of written batches.
-		for(auto [filename, paths] : hierarchyFiletoPathMap){
-			//auto filepath = entry.path();
+		for(auto& entry : fs::directory_iterator(path)){
+			auto filepath = entry.path();
 			// r0626.txt
 
 			// skip root. it get's special treatment
-			if(filename == "r.bin") continue;
+			if(filepath.filename().string() == "r.bin") continue;
 			// skip non *.bin files
-			if(!iEndsWith(filename, ".bin")) continue;
+			if(!iEndsWith(filepath.string(), ".bin")) continue;
 
-			auto batch = loadBatch(paths);
+			auto batch = loadBatch(filepath.string());
 
 			processBatch(batch);
 			auto buffer = serializeBatch(batch, bytesWritten);
@@ -360,6 +342,7 @@ struct HierarchyBuilder{
 			f.write(buffer->data_char, buffer->size);
 			f.close();
 		}
+
 		// redundant security check
         if(iEndsWith(this->path, "hierarchyChunks")){
             fs::remove_all(this->path);
