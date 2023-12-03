@@ -190,11 +190,11 @@ namespace indexer {
     void Indexer::sendCRdone() {
 
         if (fcrMPIsend != nullptr) {
-            MPISendRcvlog << "Waiting for previous send of chunkroot " << fcrWaiting.node->name << " to complete.....";
-            MPISendRcvlog.flush();
+            //MPISendRcvlog << "Waiting for previous send of chunkroot " << fcrWaiting.node->name << " to complete.....";
+            //MPISendRcvlog.flush();
             MPI_Wait(&fcrSendRequest, MPI_STATUS_IGNORE);
-            MPISendRcvlog << "Done" << endl;
-            MPISendRcvlog.flush();
+            //MPISendRcvlog << "Done" << endl;
+            //MPISendRcvlog.flush();
             free(fcrMPIsend);
         }
         int64_t sendSize = 3 * maxVarSize + maxVarSize;
@@ -203,8 +203,8 @@ namespace indexer {
         memcpy((msgBuffer), reinterpret_cast<uint8_t *>(&sendSize), sizeof(int64_t));
         memcpy((msgBuffer + maxVarSize), reinterpret_cast<const uint8_t *>(done.c_str()), done.size());
         MPI_Send(msgBuffer, sendSize, MPI_BYTE, ROOT, 10, MPI_COMM_WORLD);
-        MPISendRcvlog << "ChunkRootsDone" << endl;
-        MPISendRcvlog.flush();
+        //MPISendRcvlog << "ChunkRootsDone" << endl;
+       //MPISendRcvlog.flush();
         free(msgBuffer);
 
     }
@@ -221,8 +221,8 @@ namespace indexer {
             //MPI_Irecv(fcrMPIrcv[i], fcrRcvBufferSize, MPI_BYTE, i, 10, MPI_COMM_WORLD, &fcrRcvRequest[i]);
             fcrRcvFlag[i] = 0;
             MPI_Iprobe(i, 10, MPI_COMM_WORLD, &fcrRcvFlag[i], &fcrRcvStatus[i]);
-            MPISendRcvlog << "Expecting flushedChunkRoot from task " << i << endl;
-            MPISendRcvlog.flush();
+            //MPISendRcvlog << "Expecting flushedChunkRoot from task " << i << endl;
+            //MPISendRcvlog.flush();
         }*/
         while (!activeTasks.empty()) {
             for (auto it = activeTasks.begin(); it < activeTasks.end(); ++it) {
@@ -241,15 +241,15 @@ namespace indexer {
                     uint8_t *buffer = (uint8_t *) calloc(rcvSize, 1);
                     MPI_Recv(buffer, rcvSize, MPI_BYTE, *it, 10, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-                    MPISendRcvlog << "Indexer: received flushedChunkRoot from task " << *it;
-                    MPISendRcvlog.flush();
-                    MPISendRcvlog << " with size " << rcvSize;
+                    //MPISendRcvlog << "Indexer: received flushedChunkRoot from task " << *it;
+                    //MPISendRcvlog.flush();
+                    //MPISendRcvlog << " with size " << rcvSize;
                     int64_t rcvSize_buffer = *(reinterpret_cast<int64_t *>(buffer));
-                    MPISendRcvlog << " with size from buffer " << rcvSize_buffer << endl;
+                    //MPISendRcvlog << " with size from buffer " << rcvSize_buffer << endl;
                     // MPISendRcvlog << "Received from process " << fcrRcvStatus[*it].MPI_SOURCE
                     //         << "; with tag " << fcrRcvStatus[*it].MPI_TAG << " with error" << fcrRcvStatus[*it].MPI_ERROR << endl;
                     //MPISendRcvlog << " buffer " << reinterpret_cast<char *>(buffer);
-                    MPISendRcvlog.flush();
+                    //MPISendRcvlog.flush();
                     /*if (rcvSize > fcrRcvBufferSize) {
                         cerr << "The flushedChunkRoot sent by task " << *it
                              << " is too big. Please increase the size of the buffer in the indexer." << endl;
@@ -259,8 +259,8 @@ namespace indexer {
                     memcpy(name, reinterpret_cast<char *>(buffer + maxVarSize), 3 * maxVarSize);
                     if (std::string(name) != "ChunkRootsDone") {
                         FlushedChunkRoot fcr;
-                        MPISendRcvlog << " with name " << name << endl;
-                        MPISendRcvlog.flush();
+                        //MPISendRcvlog << " with name " << name << endl;
+                        //MPISendRcvlog.flush();
                         fcr.node = make_shared<Node>();
                         fcr.node->name = name;
                         fcr.node->min.x = *(reinterpret_cast<double *>(buffer + 4 * maxVarSize));
@@ -306,8 +306,8 @@ namespace indexer {
                         //MPISendRcvlog.flush();
 
                     } else {
-                        MPISendRcvlog << "Task " << *it << " is done" << endl;
-                        MPISendRcvlog.flush();
+                        //MPISendRcvlog << "Task " << *it << " is done" << endl;
+                        //MPISendRcvlog.flush();
                         activeTasks.erase(it);
 
                     }
@@ -348,12 +348,12 @@ namespace indexer {
         }
 
         int64_t rcvSize = *(reinterpret_cast<int64_t *>(fcrMPIsend));
-        MPISendRcvlog << "rcvSize = " << rcvSize << endl;
-        MPISendRcvlog.flush();
+        //MPISendRcvlog << "rcvSize = " << rcvSize << endl;
+        //MPISendRcvlog.flush();
         char name[24] = {0};
         memcpy((name), reinterpret_cast<char *>(fcrMPIsend + maxVarSize), 24);
-        MPISendRcvlog << "name = " << name << endl;
-        MPISendRcvlog.flush();
+        //MPISendRcvlog << "name = " << name << endl;
+        //MPISendRcvlog.flush();
         dest = (uint8_t *) memcpy((fcrMPIsend + 4 * maxVarSize), reinterpret_cast<uint8_t *>(&fcr.node->min.x),
                                   sizeof(double));
         if (dest == NULL) {
@@ -474,8 +474,8 @@ namespace indexer {
 
         MPI_Isend(fcrMPIsend, sendSize, MPI_BYTE, ROOT, 10, MPI_COMM_WORLD, &fcrSendRequest);
         fcrWaiting = fcr;
-        MPISendRcvlog << "Sent " << fcr.node->name << " to " << "ROOT" << " in " << sendSize << " bytes." << endl;
-        MPISendRcvlog.flush();
+        //MPISendRcvlog << "Sent " << fcr.node->name << " to " << "ROOT" << " in " << sendSize << " bytes." << endl;
+        //MPISendRcvlog.flush();
     }
 
     void Indexer::sendflushedChunkRoot(indexer::FlushedChunkRoot fcr) {
@@ -485,11 +485,11 @@ namespace indexer {
         if (fcrMPIsend == nullptr) {
             packAndSend(fcr);
         } else {
-            MPISendRcvlog << "Waiting for previous send of chunkroot " << fcrWaiting.node->name << " to complete.....";
-            MPISendRcvlog.flush();
+            //MPISendRcvlog << "Waiting for previous send of chunkroot " << fcrWaiting.node->name << " to complete.....";
+            //MPISendRcvlog.flush();
             MPI_Wait(&fcrSendRequest, MPI_STATUS_IGNORE);
-            MPISendRcvlog << "Done." << endl;
-            MPISendRcvlog.flush();
+            //MPISendRcvlog << "Done." << endl;
+            //MPISendRcvlog.flush();
             free(fcrMPIsend);
             packAndSend(fcr);
         }
@@ -562,8 +562,8 @@ namespace indexer {
             flushedChunkRoots.push_back(fcr);
 
         } else {
-            MPISendRcvlog << "The flushed chunkroots sent to ROOT: " << endl;
-            MPISendRcvlog << fcr << endl;
+            //MPISendRcvlog << "The flushed chunkroots sent to ROOT: " << endl;
+            //MPISendRcvlog << fcr << endl;
             sendflushedChunkRoot(fcr);
         }
 
@@ -2239,15 +2239,7 @@ namespace indexer {
             indexer.fChunkRoots.close();
             cout << "Total chunks processed by process " << process_id << " is " << indexer.totalChunks << endl;
             cout << "Total chunk roots in the flushChunkRoots vector of task " << process_id << " is " << indexer.flushedChunkRoots.size() << endl;
-            if (process_id == ROOT){
-                indexer.MPISendRcvlog << "The flushed chunkroots receive by ROOT are: " << endl;
-                int i = 0;
-                for(auto fcr: indexer.flushedChunkRoots){
-                    if (fcr.taskID != ROOT)
-                        indexer.MPISendRcvlog << "Flushed chunkroot " << i++ << " is: " << endl;
-                        indexer.MPISendRcvlog << fcr << endl;
-                }
-            }
+
         }
 
 
@@ -2287,7 +2279,12 @@ namespace indexer {
 
         { // process chunk roots in batches
 
-
+                indexer.MPISendRcvlog << "The flushed chunkroots are: " << endl;
+                int i = 0;
+                for(auto fcr: indexer.flushedChunkRoots){
+                    indexer.MPISendRcvlog << "Flushed chunkroot " << i++ << " is: " << endl;
+                    indexer.MPISendRcvlog << fcr << endl;
+                }
 
             //string tmpChunkRootsPath = targetDir + "/tmpChunkRoots.bin";
             auto tasks = indexer.processChunkRoots();
@@ -2361,10 +2358,10 @@ namespace indexer {
        }
 
         //delete tmpChunkRoots files
-        for (int i = 0; i < n_processes; i++) {
+        /*for (int i = 0; i < n_processes; i++) {
             string tmpChunkRootsPath = targetDir + "/tmpChunkRoots_" + std::to_string(i) + ".bin";
             fs::remove(tmpChunkRootsPath);
-        }
+        }*/
 
 
     }
