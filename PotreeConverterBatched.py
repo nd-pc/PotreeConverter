@@ -1,5 +1,4 @@
-
-
+import ast
 import configparser
 import glob
 import sys
@@ -47,6 +46,8 @@ class PotreeConverterBatched:
         self.programCommand = ""
         self.programName = ""
         self.logger = None
+        self.partitionsToProcess = None
+        self.lazPartitions = []
 
         config = configparser.ConfigParser()
         config.read(configFile)
@@ -81,6 +82,13 @@ class PotreeConverterBatched:
                 exit(1)
             else:
                 self.partitionsCSV = config["INPUT_OUTPUT"]["PartitionsCSV"]
+            if "PartitionsToProcess" in config["INPUT_OUTPUT"]:
+                if config["INPUT_OUTPUT"]["PartitionsToProcess"] == "all":
+                    self.partitionsToProcess = "all"
+                else:
+                    self.partitionsToProcess = ast.literal_eval(config["INPUT_OUTPUT"]["PartitionsToProcess"])
+            else:
+                self.partitionsToProcess = "all"
 
 
         if "TMP_STORAGE" not in sections:
@@ -125,6 +133,7 @@ class PotreeConverterBatched:
             self.logger.error("Copier type not recognized")
             exit(1)
 
+        self.createPartitions()
         self.createDirectories()
 
         if "SLURM_SCHEDULER" not in sections and "LOCAL_SCHEDULER" not in sections and "TORQUE_SCHEDULER" not in sections:
@@ -263,9 +272,9 @@ class PotreeConverterBatched:
                 signalToPotreeConverterMPI.write("\nnotlastbatch")
         open(signalDir + "/" + "batchno_" + str(batchCopier.getNumBatchesCopied() - 1) + "_written", "w").close()
 
-    def counting(self, lazPartitions):
+    def counting(self):
         self.logger.info("Batch copier for counting started", color="blue", bold=True)
-        for partition in lazPartitions:
+        for partition in self.lazPartitions:
             self.lazFilestoProcess.extend(partition["files"])#glob.glob(self.InputDir + "/*.[lL][aA][zZ]")
 
         while self.lazFilestoProcess:  # loop until all files are copied
@@ -305,9 +314,9 @@ class PotreeConverterBatched:
             len(self.batchesDone["counting"])) + " batches.", color="green", bold=True)
         self.lazFilestoProcess.clear()
 
-    def indexing(self, batches):
+    def indexing(self):
         self.logger.info("Batch copier for indexing started", color="blue", bold=True)
-        self.lazFilestoProcess = batches
+        self.lazFilestoProcess = self.lazPartitions.copy()
         skipPartitions = []
         indexingDone = []
         numFilesdone = 0
@@ -320,7 +329,7 @@ class PotreeConverterBatched:
                 nextBatchSize = self.indexingBatchCopier.getBatchSize(min(self.indexingBatchCopier.getCopiedBatchNums()))
             if ((nextBatchSize*self.lazCompressionRatio) + (self.indexingBatchCopier.gettotalSize() - self.indexingBatchCopier.getMaxBatchSize())) <= self.maxTmpSpaceAvailable:
             #if self.indexingBatchCopier.gettotalSize() < self.maxTmpSpaceAvailable:
-                currbatches = batches.copy()
+                currbatches = self.lazFilestoProcess.copy()
                 for lazBatch in currbatches:
                     if lazBatch["status"] == "skip":
                         skipPartitions.append(lazBatch)
@@ -372,13 +381,15 @@ class PotreeConverterBatched:
             bladnrIdx = colName.index("bladnr")
             partitionIdIdx = colName.index("partition_id")
             for row in partition:
+                if self.partitionsToProcess != "all":
+                    if int(row[partitionIdIdx]) not in self.partitionsToProcess:
+                        continue
                 if row[partitionIdIdx] not in lazfileStats:
                     lazfileStats[row[partitionIdIdx]] = {}
                     lazfileStats[row[partitionIdIdx]]["bladnr"] = [row[bladnrIdx]]
                 else:
                     lazfileStats[row[partitionIdIdx]]["bladnr"].append(row[bladnrIdx])
 
-        lazPartitions = []
 
         for id in lazfileStats:
             partitionSize = sum((Path(self.InputDir + "/C_" + bladnr.upper() + ".LAZ").stat().st_size) for bladnr in lazfileStats[id]["bladnr"])
@@ -394,10 +405,9 @@ class PotreeConverterBatched:
                 filesinPartition["status"] = "skip"
                 self.logger.warning(f"Partition {id} too big for max tmp space allowed. It will be skipped. Size: {str(partitionSize)} bytes, Tmp space available: {str(self.maxTmpSpaceAvailable)} bytes, Tmp space requrired: {str(self.lazCompressionRatio * partitionSize)} bytes")
 
-            lazPartitions.append(filesinPartition)
-        self.logger.info("Done creating partitions. Total partitions: " + str(len(lazPartitions)), color="green", bold=True)
+            self.lazPartitions.append(filesinPartition)
+        self.logger.info("Done creating partitions. Total partitions: " + str(len(self.lazPartitions)), color="green", bold=True)
 
-        return lazPartitions
 
     def createDirectories(self):
 
@@ -408,16 +418,7 @@ class PotreeConverterBatched:
         elif not Path(self.lazHeadersToCopy).exists():
             self.logger.error("Headers directory " + self.lazHeadersToCopy + " does not exist")
             exit(1)
-        else:
-            pathsCount = 0
-            for path in glob.glob(self.lazHeadersToCopy + "/*.[jJ][sS][oO][nN]"):
-                if not glob.glob(self.InputDir + "/" + Path(path).stem + ".[lL][aA][zZ]"):
-                    self.logger.error("LAZ file for " + Path(path).name + " in the input directory " + self.InputDir + " does not exist")
-                    exit(1)
-                pathsCount += 1
-            if pathsCount == 0:
-                self.logger.error("No LAZ files to process in the input directory")
-                exit(1)
+
 
         if Path(self.tmpDir).exists():
             print("Directory "  + self.tmpDir  + " for temporarily storing partial input and output already exists. Do you want to overwrite it? (y/n)")
@@ -448,8 +449,21 @@ class PotreeConverterBatched:
         Path(self.OutputDir).mkdir()
         self.logger.info("Creating directory " + self.lazHeadersDir + " for temporarily storing headers...")
         Path(self.lazHeadersDir).mkdir()
+        lazHeaders = []
+        for entry in self.lazPartitions:
+            lazHeaders.extend(map(lambda x: self.lazHeadersToCopy + "/" + Path(x).stem + ".json", entry["files"]))
         self.logger.info("Copying headers...", color="blue", bold=True)
-        self.miscCopier.copyFiles(glob.glob(self.lazHeadersToCopy + "/*.json"), self.lazHeadersDir)
+        self.miscCopier.copyFiles(lazHeaders, self.lazHeadersDir)
+        pathsCount = 0
+        for path in glob.glob(self.lazHeadersDir + "/*.json"):
+            if not glob.glob(self.InputDir + "/" + Path(path).stem + ".[lL][aA][zZ]"):
+                self.logger.error("LAZ file for " + Path(path).name + " in the input directory " + self.InputDir + " does not exist")
+                exit(1)
+            pathsCount += 1
+        if pathsCount == 0:
+            self.logger.error("No LAZ files to process in the input directory")
+            exit(1)
+        #self.miscCopier.copyFiles(glob.glob(self.lazHeadersToCopy + "/*.json"), self.lazHeadersDir)
         self.logger.info("Done copying headers", color="green", bold=True)
         Path(self.tmpOutputDir + "/counting_copy_done_signals").mkdir()
         Path(self.tmpOutputDir + "/indexing_copy_done_signals").mkdir()
@@ -464,12 +478,10 @@ class PotreeConverterBatched:
 
 def PotreeConverterMPIBatchedCopier(potreeConverterBatched):
 
-    lazpartitions = potreeConverterBatched.createPartitions()
-    potreeConverterBatched.counting(lazpartitions)
-    potreeConverterBatched.indexing(lazpartitions)
+    potreeConverterBatched.counting()
+    potreeConverterBatched.indexing()
 
     exit(0)
-
 
 if __name__ == "__main__":
 

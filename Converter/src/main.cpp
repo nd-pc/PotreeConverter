@@ -623,6 +623,9 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
 
     if(process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
 
+    //cout << "Total compressed bytes in indexing is " << formatNumber(indexer.totalCompressedBytesinIndexing) << endl;
+    //cout << "Total bytes written to octree file in indexing is " << formatNumber(indexer.totalBytesWrittenToOctreeFileinIndexing) << endl;
+
     if(process_id == ROOT) {
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Final merge time");
         cout << "Final merge..." << endl;

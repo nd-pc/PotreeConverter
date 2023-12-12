@@ -263,6 +263,16 @@ namespace indexer {
                         //MPISendRcvlog.flush();
                         fcr.node = make_shared<Node>();
                         fcr.node->name = name;
+                        /*string nameStr = string(name);
+                        double minX = *(reinterpret_cast<double *>(buffer + 4 * maxVarSize));
+                        double minY = *(reinterpret_cast<double *>(buffer + 5 * maxVarSize));
+                        double minZ = *(reinterpret_cast<double *>(buffer + 6 * maxVarSize));
+                        Vector3 min = {minX, minY, minZ};
+                        double maxX = *(reinterpret_cast<double *>(buffer + 7 * maxVarSize));
+                        double maxY = *(reinterpret_cast<double *>(buffer + 8 * maxVarSize));
+                        double maxZ = *(reinterpret_cast<double *>(buffer + 9 * maxVarSize));
+                        Vector3 max = {maxX, maxY, maxZ};
+                        fcr.node = make_shared<Node>(nameStr, min, max);*/
                         fcr.node->min.x = *(reinterpret_cast<double *>(buffer + 4 * maxVarSize));
                         fcr.node->min.y = *(reinterpret_cast<double *>(buffer + 5 * maxVarSize));
                         fcr.node->min.z = *(reinterpret_cast<double *>(buffer + 6 * maxVarSize));
@@ -1905,6 +1915,11 @@ namespace indexer {
             activeBuffer->pos += byteSize;
 
             indexer->octreeFileSize += byteSize;
+
+            /*if (indexer->indexer_state == "indexing")
+                indexer->totalCompressedBytesinIndexing += byteSize;
+            else if (indexer->indexer_state == "final_merge")
+                indexer->totalCompressedBytesinMerging += byteSize;*/
         }
 
         memcpy(buffer->data_char + targetOffset, sourceBuffer->data, byteSize);
@@ -1944,6 +1959,11 @@ namespace indexer {
                     indexer->bytesToWrite -= numBytes;
 
                     fsOctree.write(buffer->data_char, numBytes);
+
+                    /*if (indexer->indexer_state == "indexing")
+                        indexer->totalBytesWrittenToOctreeFileinIndexing += numBytes;
+                    else if (indexer->indexer_state == "final_merge")
+                        indexer->totalBytesWrittenToOctreeFileinMerging += numBytes;*/
 
                     indexer->bytesInMemory -= numBytes;
                 } else {
@@ -1988,6 +2008,8 @@ namespace indexer {
         state.bytesProcessed = 0;
         state.duration = 0;
 
+        //indexer.indexer_state = "indexing";
+
         indexer.writer->launch();
 
         auto chunks = getChunks(chunksDir, chunkFiletoPathMap);
@@ -2014,12 +2036,12 @@ namespace indexer {
 
         struct Task {
             shared_ptr<Chunk> chunk;
-            shared_ptr<Node> chunkRootNode;
-            int64_t index;
+            //shared_ptr<Node> chunkRootNode;
+            //int64_t index;
 
             Task(shared_ptr<Chunk> chunk) {
                 this->chunk = chunk;
-                chunkRootNode = make_shared<Node>(this->chunk->id, this->chunk->min, this->chunk->max);
+                //chunkRootNode = make_shared<Node>(this->chunk->id, this->chunk->min, this->chunk->max);
             }
         };
 
@@ -2058,8 +2080,8 @@ namespace indexer {
 
 
                                 auto chunk = task->chunk;
-                                //auto chunkRoot = make_shared<Node>(chunk->id, chunk->min, chunk->max);
-                                auto chunkRoot = task->chunkRootNode;
+                                auto chunkRoot = make_shared<Node>(chunk->id, chunk->min, chunk->max);
+                                //auto chunkRoot = task->chunkRootNode;
                                 auto attributes = chunks->attributes;
                                 int64_t bpp = attributes.bytes;
 
@@ -2135,10 +2157,10 @@ namespace indexer {
         vector<shared_ptr<Task>> tasks;
         for (auto chunk: chunks->list) {
             auto task = make_shared<Task>(chunk);
-            if (task->chunkRootNode->name.size() > 1) {
+            /*if (task->chunkRootNode->name.size() > 1) {
                 indexer.root->addDescendant(task->chunkRootNode);
-            }
-            task->index = tasks.size();
+            }*/
+            //task->index = tasks.size();
             tasks.push_back(task);
         }
         indexer.totalChunks += tasks.size();
@@ -2270,6 +2292,7 @@ namespace indexer {
     void doFinalMerge(Indexer &indexer, shared_ptr<Chunks> chunks, string targetDir, Sampler &sampler, Options &options,
                       State &state) {
 
+        //indexer.indexer_state = "final_merge";
         auto onNodeCompleted = [&indexer](Node *node) {
             indexer.writer->writeAndUnload(node);
             indexer.hierarchyFlusher->write(node, hierarchyStepSize);
@@ -2279,16 +2302,21 @@ namespace indexer {
 
         { // process chunk roots in batches
 
-                indexer.MPISendRcvlog << "The flushed chunkroots are: " << endl;
+                for (auto fcr: indexer.flushedChunkRoots) {
+                    if (fcr.node->name.size() > 1)
+                        indexer.root->addDescendant(fcr.node);
+                }
+                /*indexer.MPISendRcvlog << "The flushed chunkroots are: " << endl;
                 int i = 0;
                 for(auto fcr: indexer.flushedChunkRoots){
                     indexer.MPISendRcvlog << "Flushed chunkroot " << i++ << " is: " << endl;
                     indexer.MPISendRcvlog << fcr << endl;
-                }
+                }*/
 
             //string tmpChunkRootsPath = targetDir + "/tmpChunkRoots.bin";
             auto tasks = indexer.processChunkRoots();
 
+            //int64_t totalBytesReadFRomFCRVector = 0;
 
             for (auto &task: tasks) {
 
@@ -2296,14 +2324,16 @@ namespace indexer {
                     auto buffer = make_shared<Buffer>(fcr.size);
                     string tmpChunkRootsPath = targetDir + "/tmpChunkRoots_" + std::to_string(fcr.taskID) + ".bin";
                     readBinaryFile(tmpChunkRootsPath, fcr.offset, fcr.size, buffer->data);
-
                     fcr.node->points = buffer;
+                    //totalBytesReadFRomFCRVector += buffer->size;
                 }
 
                 sampler.sample(task.node, chunks->attributes, indexer.spacing, onNodeCompleted, onNodeDiscarded);
 
                 task.node->children.clear();
             }
+
+            //cout << "Total bytes read from flushedChunkRoots vector is " << totalBytesReadFRomFCRVector << endl;
 
 
         }
@@ -2323,6 +2353,10 @@ namespace indexer {
 
 
         indexer.writer->closeAndWait();
+
+
+        //cout << "Total compressed bytes in merging is " << formatNumber(indexer.totalCompressedBytesinMerging) << endl;
+        //cout << "Total bytes written to octree file in merging is " << formatNumber(indexer.totalBytesWrittenToOctreeFileinMerging) << endl;
 
         //printElapsedTime("flushing", tStart);
 
@@ -2358,10 +2392,10 @@ namespace indexer {
        }
 
         //delete tmpChunkRoots files
-        /*for (int i = 0; i < n_processes; i++) {
+        for (int i = 0; i < n_processes; i++) {
             string tmpChunkRootsPath = targetDir + "/tmpChunkRoots_" + std::to_string(i) + ".bin";
             fs::remove(tmpChunkRootsPath);
-        }*/
+        }
 
 
     }

@@ -358,6 +358,13 @@ namespace indexer{
 
         int64_t totalChunks = 0;
 
+        //string indexer_state = "";
+
+        //int64_t totalCompressedBytesinIndexing = 0;
+        //int64_t totalCompressedBytesinMerging = 0;
+        //int64_t totalBytesWrittenToOctreeFileinIndexing = 0;
+        //int64_t totalBytesWrittenToOctreeFileinMerging = 0;
+
 
 		double scale = 0.001;
 		double spacing = 1.0;
