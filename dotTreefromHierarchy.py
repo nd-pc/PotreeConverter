@@ -3,6 +3,7 @@ import sys
 from pathlib import Path
 import pprint
 from io import BytesIO
+from tqdm import tqdm
 
 # Define the enum for node types
 TYPE = {
@@ -24,7 +25,10 @@ def print_nodes(file_path, start, size):
             (node_type, child_mask, numPoints, byteOffset, byteSize) = struct.unpack("<BBIQQ", data)
             if(node_type != 2):
                 points += numPoints
-                print("node_type", TYPE[node_type], "child_mask", bin(child_mask), "numPoints", numPoints, "byteOffset", byteOffset, "byteSize", byteSize)
+                if byteOffset + byteSize > 849367283736:
+                    print("Error: byteOffset + byteSize > 849367283736" + " byteOffset: " + str(byteOffset) + " byteSize: " + str(byteSize))
+                    exit(1)
+                #print("node_type", TYPE[node_type], "child_mask", bin(child_mask), "numPoints", numPoints, "byteOffset", byteOffset, "byteSize", byteSize)
         return points
 
 # Function to read and parse the binary file
@@ -41,7 +45,10 @@ def parse_binary_tree(file_path):
             if node_type == 2:
                 break
             total_points += numPoints
-            print("node_type", TYPE[node_type], "child_mask", bin(child_mask), "numPoints", numPoints, "byteOffset", byteOffset, "byteSize", byteSize)
+            if byteOffset + byteSize > 849367283736:
+                print("Error: byteOffset + byteSize > 849367283736" + " byteOffset: " + str(byteOffset) + " byteSize: " + str(byteSize))
+                exit(1)
+            #print("node_type", TYPE[node_type], "child_mask", bin(child_mask), "numPoints", numPoints, "byteOffset", byteOffset, "byteSize", byteSize)
 
 
         proxy_node_list.append((node_type, child_mask, numPoints, byteOffset, byteSize))
@@ -53,13 +60,14 @@ def parse_binary_tree(file_path):
             if node_type == 2:
                 proxy_node_list.append((node_type, child_mask, numPoints, byteOffset, byteSize))
 
-    n_proxy_nodes_to_printed = 0
-    for proxy_node in proxy_node_list:
+    #n_proxy_nodes_to_printed = 0
+
+    for proxy_node in tqdm(proxy_node_list, desc="proxy nodes"):
         total_points += print_nodes(file_path, proxy_node[3], proxy_node[4])
-        n_proxy_nodes_to_printed += 1
-        if n_proxy_nodes_to_printed > 1000:
-            break
-        #print("total points", total_points)
+        #n_proxy_nodes_to_printed += 1
+        #if n_proxy_nodes_to_printed > 1000:
+         #   break
+    print("total points", total_points)
         # iter = 0
         # while iter < 100000:
         #     data = binary_file.read(22)

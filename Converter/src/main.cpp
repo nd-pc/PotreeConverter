@@ -41,6 +41,7 @@ Options parseArguments(int argc, char** argv) {
 	args.addArgument("generate-page,p", "Generate a ready to use web page with the given name");
 	args.addArgument("title", "Page title used when generating a web page");
     args.addArgument("threads", "Number of threads to use");
+    args.addArgument("bounds", "Bounds of the pointcloud to be converted. The format shoud be: [minx,maxx],[miny,maxy],[minz,maxz]. If not provided, the bounds will be computed from the input files.");
 
 	if (args.has("help")) {
 		cout << "PotreeConverter <source> -o <outdir>" << endl;
@@ -99,6 +100,7 @@ Options parseArguments(int argc, char** argv) {
 	bool keepChunks = args.has("keep-chunks");
 	bool noChunking = args.has("no-chunking");
 	bool noIndexing = args.has("no-indexing");
+    bool boundsProvided = args.has("bounds");
 
 
 	Options options;
@@ -117,6 +119,15 @@ Options parseArguments(int argc, char** argv) {
 	options.keepChunks = keepChunks;
 	options.noChunking = noChunking;
 	options.noIndexing = noIndexing;
+    if (boundsProvided) {
+        options.manualBounds = args.get("bounds").as<string>();
+        std::regex pattern("\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\]");
+        std::smatch matches;
+        if (!std::regex_match( options.manualBounds, matches, pattern)) {
+            cout << "bounds format is not correct. The format should be: [minx,maxx],[miny,maxy],[minz,maxz]" << endl;
+            exit(1);
+        }
+    }
     int maxThreads = (int)std::thread::hardware_concurrency();
     int threads = args.get("threads").as<int>(maxThreads);
     setNumProcessors(threads);
@@ -284,7 +295,7 @@ vector<Source> curateHeaders(string headerDir) {
     return {min, max};*/
 
 }
-Stats computeStats(vector<Source> headers) {
+Stats computeStats(vector<Source> headers, string boundString) {
 
 	Vector3 min = { Infinity , Infinity , Infinity };
 	Vector3 max = { -Infinity , -Infinity , -Infinity };
@@ -305,9 +316,10 @@ Stats computeStats(vector<Source> headers) {
 		totalPoints += source.numPoints;
 		totalBytes += source.numPoints * source.pointDataRecordLength;
 	}
-
-
-	double cubeSize = (max - min).max();
+    if (!boundString.empty()) {
+        parseBoundString(boundString, min, max);
+    }
+	double cubeSize = ceil((max - min).max());
 	Vector3 size = { cubeSize, cubeSize, cubeSize };
 	max = min + cubeSize;
 
@@ -827,11 +839,11 @@ int main(int argc, char **argv) {
 
     auto headers = curateHeaders(options.headerDir);
 
-    auto outputAttributes = computeOutputAttributes(headers, options.attributes);
+    auto outputAttributes = computeOutputAttributes(headers, options.attributes, options.manualBounds);
 
     cout << toString(outputAttributes);
 
-    auto stats = computeStats(headers);
+    auto stats = computeStats(headers, options.manualBounds);
 
     options.name = splitString("/", options.headerDir).back();
 

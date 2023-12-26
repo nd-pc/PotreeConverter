@@ -2,6 +2,7 @@ import ast
 import configparser
 import glob
 import sys
+import heapq
 from datetime import datetime
 from pathlib import Path
 import time
@@ -83,12 +84,7 @@ class PotreeConverterBatched:
             else:
                 self.partitionsCSV = config["INPUT_OUTPUT"]["PartitionsCSV"]
             if "PartitionsToProcess" in config["INPUT_OUTPUT"]:
-                if config["INPUT_OUTPUT"]["PartitionsToProcess"] == "all":
-                    self.partitionsToProcess = "all"
-                else:
-                    self.partitionsToProcess = ast.literal_eval(config["INPUT_OUTPUT"]["PartitionsToProcess"])
-            else:
-                self.partitionsToProcess = "all"
+                self.partitionsToProcess = ast.literal_eval(config["INPUT_OUTPUT"]["PartitionsToProcess"])
 
 
         if "TMP_STORAGE" not in sections:
@@ -317,36 +313,45 @@ class PotreeConverterBatched:
     def indexing(self):
         self.logger.info("Batch copier for indexing started", color="blue", bold=True)
         self.lazFilestoProcess = self.lazPartitions.copy()
+        self.lazFilestoProcess.sort(key=lambda x: x["size"])
         skipPartitions = []
         indexingDone = []
         numFilesdone = 0
         numBatches = 0
         totalBatches = len(self.lazFilestoProcess)
         while self.lazFilestoProcess:  # loop until all files are copied
-            if not self.indexingBatchCopier.getCopiedBatchNums():
-                nextBatchSize = 0
-            else:
-                nextBatchSize = self.indexingBatchCopier.getBatchSize(min(self.indexingBatchCopier.getCopiedBatchNums()))
-            if ((nextBatchSize*self.lazCompressionRatio) + (self.indexingBatchCopier.gettotalSize() - self.indexingBatchCopier.getMaxBatchSize())) <= self.maxTmpSpaceAvailable:
             #if self.indexingBatchCopier.gettotalSize() < self.maxTmpSpaceAvailable:
-                currbatches = self.lazFilestoProcess.copy()
-                for lazBatch in currbatches:
-                    if lazBatch["status"] == "skip":
-                        skipPartitions.append(lazBatch)
-                        self.lazFilestoProcess.remove(lazBatch)
-                        self.logger.warning("Skipping partition " + str(lazBatch["id"]) + ". Too big for max tmp space allowed, size: " + str(lazBatch["size"]) + " bytes, Tmp space available: " + str(self.maxTmpSpaceAvailable) + " bytes, Tmp space requrired: + " + str(self.lazCompressionRatio * lazBatch["size"]) +" bytes")
-                        continue
-                    if (self.lazCompressionRatio * lazBatch["size"]) + (
-                    self.indexingBatchCopier.gettotalSize()) <= self.maxTmpSpaceAvailable:
-                        batchToCopy = lazBatch.copy()
-                        self.lazFilestoProcess.remove(lazBatch)
-                        self.copyBatch(batchToCopy["files"], batchToCopy["size"], self.tmpInputDir, self.indexingBatchCopier,
-                                       self.tmpOutputDir + "/indexing_copy_done_signals", "indexing", batchToCopy["id"])
-                        if self.indexingBatchCopier.gettotalSize() > self.maxTmpSpaceAvailable:
-                            self.logger.warning("Space utilization exceeded in indexing after copying partition " + str(
-                                batchToCopy["id"]) + ". Total space utilization:" + str(
-                                    self.indexingBatchCopier.gettotalSize()) + " bytes, Max allowed:" + str(
-                                    self.maxTmpSpaceAvailable) + " bytes")
+            currbatches = self.lazFilestoProcess.copy()
+            for lazBatch in currbatches:
+                if lazBatch["status"] == "skip":
+                    skipPartitions.append(lazBatch)
+                    self.lazFilestoProcess.remove(lazBatch)
+                    self.logger.warning("Skipping partition " + str(lazBatch["id"]) + ". Too big for max tmp space allowed, size: " + str(lazBatch["size"]) + " bytes, Tmp space available: " + str(self.maxTmpSpaceAvailable) + " bytes, Tmp space requrired: + " + str((self.lazCompressionRatio + 2 + 1) * lazBatch["size"]) +" bytes")
+                    continue
+                copiedBatchNums = self.indexingBatchCopier.getCopiedBatchNums()
+                if not copiedBatchNums:
+                    spaceUtilization = lazBatch["size"] * (self.lazCompressionRatio + 2 + 1)
+                elif len(copiedBatchNums) == 1:
+                    currBatchSize = self.indexingBatchCopier.gettotalSize()
+                    #Assuming that the currBatch is immediately removed before distributiion phase of nextBatch get start
+                    spaceUtilization = (currBatchSize * 2) + (lazBatch["size"] * (self.lazCompressionRatio +  1))
+                else:
+                    currBatchSize = self.indexingBatchCopier.getBatchSize(heapq.nsmallest(2, copiedBatchNums)[0])
+                    nextBatchSize = self.indexingBatchCopier.getBatchSize(heapq.nsmallest(2, copiedBatchNums)[1])
+                    #Assuming that the currBatch is immediately removed before distributiion phase of nextBatch get start
+                    spaceUtilization = (currBatchSize * 2) + (nextBatchSize * (self.lazCompressionRatio)) + lazBatch["size"] + self.indexingBatchCopier.gettotalSize() - currBatchSize
+
+                # if not self.indexingBatchCopier.getCopiedBatchNums():
+                #     nextBatchSize = 0
+                #
+                # else:
+                #     nextBatchSize = self.indexingBatchCopier.getBatchSize(min(self.indexingBatchCopier.getCopiedBatchNums()))
+                #if ((nextBatchSize*self.lazCompressionRatio) + (self.indexingBatchCopier.gettotalSize() - nextBatchSize + lazBatch["size"])) <= self.maxTmpSpaceAvailable:
+                if spaceUtilization <= self.maxTmpSpaceAvailable:
+                    batchToCopy = lazBatch.copy()
+                    self.lazFilestoProcess.remove(lazBatch)
+                    self.copyBatch(batchToCopy["files"], batchToCopy["size"], self.tmpInputDir, self.indexingBatchCopier,
+                                   self.tmpOutputDir + "/indexing_copy_done_signals", "indexing", batchToCopy["id"])
 
             self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
             if not self.indexingBatchCopier.isbatchDictEmpty():
@@ -381,7 +386,7 @@ class PotreeConverterBatched:
             bladnrIdx = colName.index("bladnr")
             partitionIdIdx = colName.index("partition_id")
             for row in partition:
-                if self.partitionsToProcess != "all":
+                if self.partitionsToProcess is not None:
                     if int(row[partitionIdIdx]) not in self.partitionsToProcess:
                         continue
                 if row[partitionIdIdx] not in lazfileStats:
@@ -399,11 +404,11 @@ class PotreeConverterBatched:
             filesinPartition["id"] = id
             for bladnr in lazfileStats[id]["bladnr"]:
                 filesinPartition["files"] .append(self.InputDir + "/C_" + bladnr.upper() + ".LAZ")
-            if self.lazCompressionRatio * partitionSize <= self.maxTmpSpaceAvailable:
+            if (self.lazCompressionRatio + 2 + 1) * partitionSize <= self.maxTmpSpaceAvailable:
                 filesinPartition["status"] = "do"
             else:
                 filesinPartition["status"] = "skip"
-                self.logger.warning(f"Partition {id} too big for max tmp space allowed. It will be skipped. Size: {str(partitionSize)} bytes, Tmp space available: {str(self.maxTmpSpaceAvailable)} bytes, Tmp space requrired: {str(self.lazCompressionRatio * partitionSize)} bytes")
+                self.logger.warning(f"Partition {id} too big for max tmp space allowed. It will be skipped. Size: {str(partitionSize)} bytes, Tmp space available: {str(self.maxTmpSpaceAvailable)} bytes, Tmp space requrired: {str((self.lazCompressionRatio + 2 + 1) * partitionSize)} bytes")
 
             self.lazPartitions.append(filesinPartition)
         self.logger.info("Done creating partitions. Total partitions: " + str(len(self.lazPartitions)), color="green", bold=True)
@@ -484,8 +489,6 @@ def PotreeConverterMPIBatchedCopier(potreeConverterBatched):
     exit(0)
 
 if __name__ == "__main__":
-
-
     if len(sys.argv) != 2:
         print("Usage: python3 PotreeConverterBatched.py <config_file>")
         exit(1)

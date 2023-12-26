@@ -2230,7 +2230,7 @@ namespace indexer {
         }
 
         if (process_id ==ROOT){
-            indexer.currentTotalOctreeFileSize += indexer.processOctreeFileOffset + indexer.octreeFileSize;
+            indexer.currentTotalOctreeFileSize = indexer.processOctreeFileOffset + indexer.octreeFileSize;
         }
 
         indexer.hierarchyFlusher->flush(hierarchyStepSize, indexer.processOctreeFileOffset);

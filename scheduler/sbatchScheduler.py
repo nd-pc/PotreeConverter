@@ -113,10 +113,11 @@ class SbatchScheduler(Scheduler):
     def getJobId(self):
         return self.jobId
 
+
     def killJob(self):
         if self.jobId:
             cmd = shutil.which("scancel") + " " + self.jobId
             subprocess.run(cmd, shell=True)
-            self.logger.info(f"{self.programName} sbatch job with job id {self.jobId} has been cancelled", colorama="red")
+            self.logger.info(f"{self.programName} sbatch job with job id {self.jobId} has been cancelled", color="red")
         else:
             self.logger.error(f"No {self.programName} sbatch job running to cancel")

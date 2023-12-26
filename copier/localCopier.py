@@ -66,12 +66,13 @@ class LocalCopier(Copier):
             partition = str(self.batchCopied)
         self.batchDict[self.batchCopied] = {"files": list(map(lambda x: str(destination + "/" + Path(x).name), filesToCopy)), "size": size, "starttime":time.time(), "destdir": destination, "partition": partition}
         if filesToCopy != []:
+            self.logger.info("Copying batch-" + str(self.batchCopied) + "/partition-" + partition + " to " + destination + ", size: " + str(size/(1024**3)) + " gigabytes ...")
             startCopyTime = time.time()
             self.copyFiles(filesToCopy, destination)
             copyTime = time.time() - startCopyTime
             self.totalCopyTime += copyTime
             self.totalSize += self.storageUtilizationFactor * size
-            self.logger.info("Copied batch-" + str(self.batchCopied) + "/partition-" + partition +  " to " + destination + ", size: "  + str(size/(1024**3)) + " gigabytes, " + "time: " + str(copyTime) + ", copying throughput: " + str((size / copyTime) / (1024**2)) + " MB/s")#: " + ",".join(map(lambda x: Path(x).name, filesToCopy.split())))
+            self.logger.info("Copying finished for batch-" + str(self.batchCopied) + "/partition-" + partition +  " to " + destination + ", size: "  + str(size/(1024**3)) + " gigabytes, " + "time: " + str(copyTime) + ", copying throughput: " + str((size / copyTime) / (1024**2)) + " MB/s", color="green")
         self.batchCopied += 1
     def copyFiles(self, filesToCopy, destination):
         subsets = self.filesSubsets(filesToCopy, NAME_MAX, PATH_MAX)

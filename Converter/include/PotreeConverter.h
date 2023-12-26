@@ -2,9 +2,11 @@
 #pragma once
 
 #include <execution>
+#include <regex>
 
 #include "Vector3.h"
 #include "LasLoader/LasLoader.h"
+#include "logger.h"
 
 
 
@@ -193,8 +195,24 @@ inline vector<Attribute> computeOutputAttributes(Source& header) {
 
 	return list;
 }
+void parseBoundString(const std::string& boundString, Vector3 &min, Vector3 &max) {
+    // Define the regex pattern
+    std::regex pattern("\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\]");
 
-inline Attributes computeOutputAttributes(vector<Source> &sources, vector<string> requestedAttributes) {
+    // Match the input string against the regex pattern
+    std::smatch matches;
+    if (std::regex_match(boundString, matches, pattern)) {
+        // Extract matched values
+        min = {std::stod(matches[1].str()), std::stod(matches[3].str()), std::stod(matches[5].str())};
+        max = {std::stod(matches[2].str()), std::stod(matches[4].str()), std::stod(matches[6].str())};
+
+    } else {
+        // Parsing failed, raise an error
+        logger::ERROR("The string passed to --bound option is not valid. The expected format is: [min_x,max_x],[min_y,max_y],[min_z,max_z]");
+        exit(123);
+    }
+}
+inline Attributes computeOutputAttributes(vector<Source> &sources, vector<string> requestedAttributes, string boundString = "") {
 	// TODO: a bit wasteful to iterate over source files and load headers twice
 
 	Vector3 scaleMin = { Infinity, Infinity, Infinity };
@@ -240,6 +258,10 @@ inline Attributes computeOutputAttributes(vector<Source> &sources, vector<string
 
 			mtx.unlock();
 			});
+
+        if (!boundString.empty()) {
+            parseBoundString(boundString, min, max);
+        }
 
 		auto scaleOffset = computeScaleOffset(min, max, scaleMin);
 		scale = scaleOffset.scale;
