@@ -6,6 +6,7 @@
 
 #include "MPIcommon.h"
 #include "indexer.h"
+#include "PotreeConverter.h"
 
 #include "logger.h"
 #include "DbgWriter.h"
@@ -826,13 +827,18 @@ namespace indexer {
         };
 
         Attributes &attributes = this->attributes;
-        auto getAttributesJsonString = [&attributes, t, s, toJson, vecToJson, vecI64ToJson]() {
+        auto getAttributesJsonString = [&attributes, t, s, toJson, vecToJson, vecI64ToJson, &options]() {
 
             stringstream ss;
             ss << "[" << endl;
 
             for (int i = 0; i < attributes.list.size(); i++) {
                 auto &attribute = attributes.list[i];
+                if (attribute.name == "position") {
+                    if (!options.manualBounds.empty()){
+                        parseBoundString(options.manualBounds, attribute.min, attribute.max);
+                    }
+                }
 
                 if (i == 0) {
                     ss << t(2) << "{" << endl;
@@ -1833,9 +1839,9 @@ namespace indexer {
 
     }
 
-    void Writer::launch() {
+    void Writer::launch(int batchNum) {
 
-        string octreePath = indexer->targetDir + "/octree_" + to_string(process_id) + ".bin";
+        string octreePath = indexer->targetDir + "/octree_" + to_string(batchNum) + "_" + to_string(process_id) + ".bin";
         fsOctree.open(octreePath, ios::out | ios::binary);
         this->closed = false;
         this->closeRequested = false;
@@ -1994,7 +2000,7 @@ namespace indexer {
     }
 
 
-    shared_ptr<Chunks> doIndexing(string chunksDir, State &state, Options &options,  Sampler &sampler, Indexer &indexer, bool islastbatch, shared_ptr<map<string, vector<string>>> chunkFiletoPathMap) {
+    shared_ptr<Chunks> doIndexing(string chunksDir, State &state, Options &options,  Sampler &sampler, Indexer &indexer, bool islastbatch, shared_ptr<map<string, vector<string>>> chunkFiletoPathMap, int batchNum) {
 
         cout << endl;
         cout << "=======================================" << endl;
@@ -2010,7 +2016,7 @@ namespace indexer {
 
         //indexer.indexer_state = "indexing";
 
-        indexer.writer->launch();
+        indexer.writer->launch(batchNum);
 
         auto chunks = getChunks(chunksDir, chunkFiletoPathMap);
         MPI_Barrier(MPI_COMM_WORLD);
@@ -2209,20 +2215,19 @@ namespace indexer {
         indexer.processOctreeFileOffset = indexer.currentTotalOctreeFileSize;
 
         for (int i = process_id - 1; i >= 0; i--) {
-            MPI_Request sendOffsetRequest = MPI_REQUEST_NULL;
-            MPI_Isend(&indexer.octreeFileSize, 1, MPI_INT64_T, i, 20, MPI_COMM_WORLD, &sendOffsetRequest);
+            //MPI_Request sendOffsetRequest = MPI_REQUEST_NULL;
+            MPI_Send(&indexer.octreeFileSize, 1, MPI_INT64_T, i, 20, MPI_COMM_WORLD);
         }
 
         int64_t offset[n_processes - process_id - 1];
-        MPI_Request recvOffsetRequest[n_processes - process_id - 1];
+        //MPI_Request recvOffsetRequest[n_processes - process_id - 1];
         for (int i = process_id + 1; i < n_processes; i++) {
-            MPI_Irecv(&offset[i - process_id - 1], 1, MPI_INT64_T, i, 20, MPI_COMM_WORLD,
-                      &recvOffsetRequest[i - process_id - 1]);
+            //recvOffsetRequest[i - process_id - 1] = MPI_REQUEST_NULL;
+            MPI_Recv(&offset[i - process_id - 1], 1, MPI_INT64_T, i, 20, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
-        MPI_Waitall(n_processes - process_id - 1, recvOffsetRequest, MPI_STATUSES_IGNORE);
+        //MPI_Waitall(n_processes - process_id - 1, recvOffsetRequest, MPI_STATUSES_IGNORE);
 
         //int64_t totalOctreeFileOffset = 0;
-
         for (int i = process_id + 1; i < n_processes; i++) {
             indexer.processOctreeFileOffset += offset[i - process_id - 1];
             cout << "Process " << process_id << " received offset " << offset[i - process_id - 1] << " from process " << i

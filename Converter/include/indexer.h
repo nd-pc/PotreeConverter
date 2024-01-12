@@ -113,7 +113,7 @@ namespace indexer{
 
 		Writer(Indexer* indexer);
 
-        void launch();
+        void launch(int batchNum);
 
 		void writeAndUnload(Node* node);
 
@@ -469,7 +469,7 @@ namespace indexer{
 		string do_grouping() const { return "\3"; }
 	};
 
-	shared_ptr<Chunks> doIndexing(string chunksDir, State& state, Options& options, Sampler& sampler, Indexer &indexer, bool islastbatch, shared_ptr<std::map<string, vector<string>>> chunkFiletoPathMap);
+	shared_ptr<Chunks> doIndexing(string chunksDir, State& state, Options& options, Sampler& sampler, Indexer &indexer, bool islastbatch, shared_ptr<std::map<string, vector<string>>> chunkFiletoPathMap, int batchNum);
     void doFinalMerge(Indexer &indexer, shared_ptr<Chunks> chunks, string targetDir, Sampler &sampler, Options &options,
                       State &state);
 

@@ -23,9 +23,13 @@ from multiprocessing import Process
 
 
 class PotreeConverterBatched:
+    ''' The class is a driver for the PotreeConverterMPI program. It starts the PotreeConverterMPI program and load/unload the partitions '''
     def __init__(self, configFile):
+        ''' The constructor reads the config file and initializes the class variables. It also starts the PotreeConverterMPI program '''
+        #class variables
         self.maxTmpSpaceAvailable = 0
         self.countingBatchSize = 0
+        self.distributionBatchSize = 0
         self.lazCompressionRatio = 0
         self.tmpDir = ""
         self.tmpInputDir = ""
@@ -38,12 +42,13 @@ class PotreeConverterBatched:
         self.logger = None
         self.copierType = ""
         self.countingBatchCopier = None
-        self.indexingBatchCopier = None
+        self.distributionBatchCopier = None
         self.miscCopier = None
         self.logFile = ""
-        self.batchesDone = {"counting": [], "indexing": []}
-        self.numFilesDone = {"counting": 0, "indexing": 0}
+        self.batchesDone = {"counting": [], "indexing": [], "distribution": []}
+        self.numFilesDone = {"counting": 0, "indexing": 0, "distribution": 0}
         self.lazFilestoProcess = []
+        self.lazDistributionBatch = []
         self.programCommand = ""
         self.programName = ""
         self.logger = None
@@ -115,6 +120,7 @@ class PotreeConverterBatched:
                 else:
                     self.maxTmpSpaceAvailable = eval(config["TMP_STORAGE"]["MaxTmpSpaceAvailable"])
                 self.countingBatchSize = eval(config["TMP_STORAGE"]["CountingBatchSize"])
+                self.distributionBatchSize = eval(config["TMP_STORAGE"]["DistributionBatchSize"])
                 self.lazCompressionRatio = eval(config["TMP_STORAGE"]["LazCompressionRatio"])
         if "COPIER" not in sections:
             self.copierType = config["DEFAULT"]["CopierType"]
@@ -123,6 +129,7 @@ class PotreeConverterBatched:
 
         if self.copierType == "local":
              self.countingBatchCopier = LocalCopier(self.logger)
+             self.distributionBatchCopier = LocalCopier(self.logger)
              self.indexingBatchCopier = LocalCopier(self.logger)
              self.miscCopier = LocalCopier(self.logger)
         else:
@@ -200,6 +207,7 @@ class PotreeConverterBatched:
 
 
     def bordered(self, text):
+        ''' This function is used to print a bordered text '''
         lines = text.split("\n")
         width = max(len(s) for s in lines)
         res = ['=' * width]
@@ -209,68 +217,107 @@ class PotreeConverterBatched:
         return '\n'.join(res)
 
     def catFiles(self, filesToCat, destinationFile, batchCopier):
-
+        ''' This function is used to concatenate the output files of the PotreeConverterMPI program after processing a partition'''
         batchCopier.concatFiles(filesToCat, destinationFile)
         batchCopier.removeFiles(filesToCat)
 
     def testBatchDone(self, batchCopier, signalDir, state):
-        for signal in glob.glob(signalDir + "/batchno_*_" + state + "_time_written"):
-            batchNum = int(Path(signal).stem.split("_")[1])
+        ''' This function is used to test if a batch/partition is done processing. If a batch is done processing, it will be removed from the batch dictionary and the corresponding signal files will be removed'''
+        if state == "indexing" or state == "distribution":
+            partitionorbatch = "Partition"
+        else:
+            partitionorbatch = "Batch"
+        doneBatchNums = []
+        if glob.glob(signalDir + "/batchno_*_" + state + "_done") != []:
+            doneBatchNums = sorted(map(lambda x: int(Path(x).stem.split("_")[1]), glob.glob(signalDir + "/batchno_*_" + state + "_time_written")))
+        for batchNum in doneBatchNums:
             signalFile = open(signalDir + "/batchno_" + str(batchNum) + "_" + state + "_done", "r")
-
-            # line2 = ""
-            # while line2 != "msgcomplete":
-            #     time.sleep(1)
-            #     signalFile.readline()
-            #     line2 = signalFile.readline()
-            #     signalFile.seek(0)
-
-            duration = float(signalFile.readline().rstrip("\n"))
+            durationStr = signalFile.readline().rstrip("\n")
+            duration = float(durationStr)
             signalFile.close()
-            #with open(signal, "r") as signalFile:
-              #  duration = float(signalFile.read())
-
-            self.logger.info("Batch-" + str(batchNum) + "/Partition-" + str(
+            if (durationStr != "-1.0"):
+                self.logger.info(partitionorbatch + "-" + str(
                 batchCopier.getPartitionNum(batchNum)) + " done " + state + " in " + str(
                 duration) + " seconds", color="green")
-            self.batchesDone[state].append(str(batchNum) + "/" + str(batchCopier.getPartitionNum(batchNum)))
+            if state == "distribution":
+                self.batchesDone[state].append(str(batchNum) + "(in partition-" + str(batchCopier.getPartitionNum(batchNum)) + ")")
+            else:
+                self.batchesDone[state].append(str(batchCopier.getPartitionNum(batchNum)))
             self.numFilesDone[state] += len(batchCopier.getFiles(batchNum))
-            # spaceleft += size
             batchCopier.removeBatch(batchNum)
             batchCopier.setTotalSize(max(0, batchCopier.gettotalSize()))
             Path(signalDir + "/batchno_" + str(batchNum) + "_" + state + "_done").unlink()
-            Path(signal).unlink()
+            Path(signalDir + "/batchno_" + str(batchNum) + "_" + state + "_time_written").unlink()
             if state == "indexing":
                 filesToCat = []
-                for octree in glob.glob(self.tmpOutputDir + "/octree*.bin"):
+                for octree in glob.glob(self.tmpOutputDir + "/octree_" + str(batchNum) + "_*.bin"):
                     filesToCat.append(octree)
-                filesToCat.sort(key=lambda x: int(Path(x).stem.split("_")[1]), reverse=True)
+                filesToCat.sort(key=lambda x: int(Path(x).stem.split("_")[-1]), reverse=True)
                 self.catFiles(filesToCat, self.OutputDir + "/octree.bin", batchCopier)
                 open(self.tmpOutputDir + "/indexing_copy_done_signals/batchno_" + str(batchNum) + "_concatenated",
                      "w").close()
-
+        if not batchCopier.isbatchDictEmpty():
+            pending = ",".join(map(lambda x: str(batchCopier.getPartitionNum(x)), batchCopier.getCopiedBatchNums()))
+            done = ",".join(self.batchesDone[state])
+            if state == "distribution":
+                pending = ",".join(map(lambda x: str(x) + "(in partition-" + str(batchCopier.getPartitionNum(x)) + ")", batchCopier.getCopiedBatchNums()))
+            self.logger.info(state.capitalize() +  " pending for " + partitionorbatch.lower() + "s: " + pending + ". Done " + partitionorbatch.lower() + "s: " + done)
     def copyBatch(self, filesToCopy, size, destination, batchCopier, signalDir, state, partition=""):
+        ''' This function is used to copy a batch/partition to the temporary input directory.
+        :param filesToCopy: The list of files to copy
+        :param size: The total size of the files to copy
+        :param destination: The destination directory
+        :param batchCopier: The copier object
+        :param signalDir: The directory where to write signal files for the PotreeConverterMPI program
+        :param state: The state of the batch/partition
+        :param partition: The partition number
+        '''
+
         if self.tmpInputDir != self.InputDir:
             batchCopier.copyBatch(filesToCopy, size, destination, partition)
         else:
             batchCopier.copyBatch([], 0, destination, partition)
-        if batchCopier.gettotalSize() > self.maxTmpSpaceAvailable:
-            self.logger.warning("Space utilization exceeded in " + state + " after copying batch " + str(
-                batchCopier.getNumBatchesCopied() - 1) + ". Total space utilization:" + str(
-                batchCopier.gettotalSize()) + " bytes, Max allowed:" + str(
-                self.maxTmpSpaceAvailable) + " bytes")
-        with open(signalDir + "/" + "batchno_" + str(batchCopier.getNumBatchesCopied() - 1) + "_copied",
-                  "w") as signalToPotreeConverterMPI:  # signal to potree converter
-            signalToPotreeConverterMPI.write(",".join(list(map(lambda x: str(destination + "/" + Path(x).name), filesToCopy))))  # write the copied files to the signal file
-            if (self.lazFilestoProcess == []):
-                signalToPotreeConverterMPI.write("\nlastbatch")
-            else:
-                signalToPotreeConverterMPI.write("\nnotlastbatch")
-        open(signalDir + "/" + "batchno_" + str(batchCopier.getNumBatchesCopied() - 1) + "_written", "w").close()
+        if state != "indexing":
+            with open(signalDir + "/" + "batchno_" + str(batchCopier.getNumBatchesCopied() - 1) + "_copied",
+                      "w") as signalToPotreeConverterMPI:  # signal to potree converter
+                signalToPotreeConverterMPI.write(",".join(list(map(lambda x: str(destination + "/" + Path(x).name), filesToCopy))))  # write the copied files to the signal file
+                if (state == "distribution"):
+                    if self.lazDistributionBatch == []:
+                        signalToPotreeConverterMPI.write("\nlastminibatchinpartition")
+                    else:
+                        signalToPotreeConverterMPI.write("\nnotlastminibatchinpartition")
+                if (self.lazFilestoProcess == []):
+                    signalToPotreeConverterMPI.write("\nlastbatch")
+                else:
+                    signalToPotreeConverterMPI.write("\nnotlastbatch")
+            open(signalDir + "/" + "batchno_" + str(batchCopier.getNumBatchesCopied() - 1) + "_written", "w").close()
 
+    def distribution(self, lazPartition, partitionId):
+        ''' Thev function to load/unload partitions for the distribution phase of the PotreeConverterMPI program
+        :param lazPartition
+        :param partition number
+        '''
+        self.lazDistributionBatch = lazPartition.copy()
+        while self.lazDistributionBatch:  # loop until all files are copied
+            size = 0
+            filesToCopy = []
+            currlazFilesforDist = self.lazDistributionBatch.copy()
+            for laz in currlazFilesforDist:
+                p = Path(laz)
+                size += p.stat().st_size
+                if size <= self.distributionBatchSize:
+                    filesToCopy.append(laz)
+                    self.lazDistributionBatch.remove(laz)
+                else:
+                    break
+            self.copyBatch(filesToCopy, size, self.tmpInputDir, self.distributionBatchCopier, self.tmpOutputDir + "/distribution_copy_done_signals", "distribution", partitionId)
     def counting(self):
+        ''' The function to load/unload a batch of LAZ files for the counting phase of the PotreeConverterMPI program'''
+
         self.logger.info("Batch copier for counting started", color="blue", bold=True)
         for partition in self.lazPartitions:
+            if partition["status"] == "skip":
+                continue
             self.lazFilestoProcess.extend(partition["files"])#glob.glob(self.InputDir + "/*.[lL][aA][zZ]")
 
         while self.lazFilestoProcess:  # loop until all files are copied
@@ -289,21 +336,10 @@ class PotreeConverterBatched:
 
                 self.copyBatch(filesToCopy, size, self.tmpInputDir, self.countingBatchCopier, self.tmpOutputDir + "/counting_copy_done_signals", "counting")
             self.testBatchDone(self.countingBatchCopier, self.tmpOutputDir + "/counting_done_signals", "counting")
-            if not self.countingBatchCopier.isbatchDictEmpty():
-                self.logger.info("Counting pending for batches/partitions: " + ",".join(
-                    map(lambda x: str(x) + "/" + str(self.countingBatchCopier.getPartitionNum(x)),
-                        self.countingBatchCopier.getCopiedBatchNums())) + ". Done batches/partitions: " + ",".join(
-                    self.batchesDone["counting"]))
-                time.sleep(60)
+
         while not self.countingBatchCopier.isbatchDictEmpty():
             self.testBatchDone(self.countingBatchCopier, self.tmpOutputDir + "/counting_done_signals", "counting")
-
-            if not self.countingBatchCopier.isbatchDictEmpty():
-                self.logger.info("Counting pending for batches/partitions: " + ",".join(
-                    map(lambda x: str(x) + "/" + str(self.countingBatchCopier.getPartitionNum(x)),
-                        self.countingBatchCopier.getCopiedBatchNums())) + ". Done batches/partitions: " + ",".join(
-                    self.batchesDone["counting"]))
-                time.sleep(60)
+            time.sleep(60)
 
         self.logger.info("Counting finished. Total " + str(
             self.numFilesDone["counting"]) + " files counted in " + str(
@@ -311,6 +347,7 @@ class PotreeConverterBatched:
         self.lazFilestoProcess.clear()
 
     def indexing(self):
+        '''The function to load/unload a batch of LAZ files for the indexing phase of the PotreeConverterMPI program'''
         self.logger.info("Batch copier for indexing started", color="blue", bold=True)
         self.lazFilestoProcess = self.lazPartitions.copy()
         self.lazFilestoProcess.sort(key=lambda x: x["size"])
@@ -334,12 +371,12 @@ class PotreeConverterBatched:
                 elif len(copiedBatchNums) == 1:
                     currBatchSize = self.indexingBatchCopier.gettotalSize()
                     #Assuming that the currBatch is immediately removed before distributiion phase of nextBatch get start
-                    spaceUtilization = (currBatchSize * 2) + (lazBatch["size"] * (self.lazCompressionRatio +  1))
+                    spaceUtilization = (currBatchSize * 2) + (lazBatch["size"] * 2) + (lazBatch["size"] * self.lazCompressionRatio)
                 else:
                     currBatchSize = self.indexingBatchCopier.getBatchSize(heapq.nsmallest(2, copiedBatchNums)[0])
                     nextBatchSize = self.indexingBatchCopier.getBatchSize(heapq.nsmallest(2, copiedBatchNums)[1])
                     #Assuming that the currBatch is immediately removed before distributiion phase of nextBatch get start
-                    spaceUtilization = (currBatchSize * 2) + (nextBatchSize * (self.lazCompressionRatio)) + lazBatch["size"] + self.indexingBatchCopier.gettotalSize() - currBatchSize
+                    spaceUtilization = (currBatchSize * 2) + (nextBatchSize * (self.lazCompressionRatio + 2)) + lazBatch["size"] + self.indexingBatchCopier.gettotalSize()
 
                 # if not self.indexingBatchCopier.getCopiedBatchNums():
                 #     nextBatchSize = 0
@@ -350,35 +387,43 @@ class PotreeConverterBatched:
                 if spaceUtilization <= self.maxTmpSpaceAvailable:
                     batchToCopy = lazBatch.copy()
                     self.lazFilestoProcess.remove(lazBatch)
-                    self.copyBatch(batchToCopy["files"], batchToCopy["size"], self.tmpInputDir, self.indexingBatchCopier,
-                                   self.tmpOutputDir + "/indexing_copy_done_signals", "indexing", batchToCopy["id"])
 
-            self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
-            if not self.indexingBatchCopier.isbatchDictEmpty():
-                self.logger.info("Indexing pending for batches/partitions: " + ",".join(
-                    map(lambda x: str(x) + "/" + str(self.indexingBatchCopier.getPartitionNum(x)),
-                        self.indexingBatchCopier.getCopiedBatchNums())) + ". Skipped partitions :" + ",".join(
-                    map(lambda x: str(x["id"]), skipPartitions)) + ". Done batches/partitions: " + ",".join(
-                    self.batchesDone["indexing"]))
-                time.sleep(60)
+                    self.copyBatch([], batchToCopy["size"], self.tmpInputDir, self.indexingBatchCopier,
+                      self.tmpOutputDir + "", "indexing", batchToCopy["id"])
+                    self.distribution(batchToCopy["files"], batchToCopy["id"])
+                self.testBatchDone(self.distributionBatchCopier, self.tmpOutputDir + "/distribution_done_signals", "distribution")
+                self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
 
-        while not self.indexingBatchCopier.isbatchDictEmpty():
-            self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
+        while (not self.indexingBatchCopier.isbatchDictEmpty()) or (not self.distributionBatchCopier.isbatchDictEmpty()):
+            if not self.distributionBatchCopier.isbatchDictEmpty():
+                self.testBatchDone(self.distributionBatchCopier, self.tmpOutputDir + "/distribution_done_signals", "distribution")
             if not self.indexingBatchCopier.isbatchDictEmpty():
-                self.logger.info("Indexing pending for batches/partitions: " + ",".join(
-                    map(lambda x: str(x) + "/" + str(self.indexingBatchCopier.getPartitionNum(x)),
-                        self.indexingBatchCopier.getCopiedBatchNums())) + ". Skipped partitions:" + ",".join(
-                    map(lambda x: str(x["id"]), skipPartitions)) + ". Done batches/partitions: " + ",".join(
-                    indexingDone))
-                time.sleep(60)
+                self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
+            time.sleep(60)
         self.logger.info("Indexing finished. Total " + str(
             self.numFilesDone["indexing"]) + " files indexed in " + str(
             len(self.batchesDone["indexing"])) + " partitions. Total " + str(totalBatches) + " partitions, " + str(
             len(skipPartitions)) +  " skipped" , color="green", bold=True)
 
-    def createPartitions(self):
-        self.logger.info("Creating partitions...", color="blue", bold=True)
 
+    def parseBladnr(self, bladnr):
+       ''' This function is used to parse the bladnr from the partitions CSV file. The following function is used to parse the bladnr for two possible formats of the bladnr:
+       1. 1234
+       2. /path/to/C_1234.LAZ
+       Modify the following function if the bladnr format is different
+       :param bladnr: The bladnr to parse
+       :return: The path to the bladnr file in the input directory
+       '''
+       if bladnr.upper().endswith(".LAZ"):
+            bladnrPath = self.InputDir + "/" + bladnr.split("/")[-1]
+       else:
+            bladnrPath = self.InputDir + "/C_" + bladnr.upper() + ".LAZ"
+       return bladnrPath
+
+
+    def createPartitions(self):
+        ''' This function is used to create the partitions from the partitions CSV file. The partitions are created based on the size of the LAZ files and the max tmp space available. The partitions are stored in the lazPartitions list'''
+        self.logger.info("Creating partitions...", color="blue", bold=True)
         lazfileStats = {}
         with open(self.partitionsCSV, "r", newline='') as partitionFile:
             partition = csv.reader(partitionFile)
@@ -397,13 +442,15 @@ class PotreeConverterBatched:
 
 
         for id in lazfileStats:
-            partitionSize = sum((Path(self.InputDir + "/C_" + bladnr.upper() + ".LAZ").stat().st_size) for bladnr in lazfileStats[id]["bladnr"])
+            partitionSize = 0
             filesinPartition = {}
-            filesinPartition["size"] = partitionSize
             filesinPartition["files"] = []
             filesinPartition["id"] = id
             for bladnr in lazfileStats[id]["bladnr"]:
-                filesinPartition["files"] .append(self.InputDir + "/C_" + bladnr.upper() + ".LAZ")
+                bladnrPath = self.parseBladnr(bladnr)
+                filesinPartition["files"].append(bladnrPath)
+                partitionSize += Path(bladnrPath).stat().st_size
+            filesinPartition["size"] = partitionSize
             if (self.lazCompressionRatio + 2 + 1) * partitionSize <= self.maxTmpSpaceAvailable:
                 filesinPartition["status"] = "do"
             else:
@@ -415,7 +462,7 @@ class PotreeConverterBatched:
 
 
     def createDirectories(self):
-
+        ''' This function is used to create the directories for the PotreeConverterMPI program. It also copies the headers to the temporary directory'''
         self.logger.info("Creating directories...", color="blue", bold=True)
         if not Path(self.InputDir).exists():
             self.logger.error("Input directory " + self.InputDir + " does not exist")
@@ -472,23 +519,26 @@ class PotreeConverterBatched:
         self.logger.info("Done copying headers", color="green", bold=True)
         Path(self.tmpOutputDir + "/counting_copy_done_signals").mkdir()
         Path(self.tmpOutputDir + "/indexing_copy_done_signals").mkdir()
+        Path(self.tmpOutputDir + "/distribution_copy_done_signals").mkdir()
         Path(self.tmpOutputDir + "/counting_done_signals").mkdir()
         Path(self.tmpOutputDir + "/indexing_done_signals").mkdir()
+        Path(self.tmpOutputDir + "/distribution_done_signals").mkdir()
         self.logger.info("Done creating directories", color="green", bold=True)
 
     def removeDirectories(self, directories):
+        ''' This function is used to remove the directories'''
         for directory in directories:
             shutil.rmtree(directory)
 
 
 def PotreeConverterMPIBatchedCopier(potreeConverterBatched):
-
     potreeConverterBatched.counting()
     potreeConverterBatched.indexing()
 
     exit(0)
 
 if __name__ == "__main__":
+
     if len(sys.argv) != 2:
         print("Usage: python3 PotreeConverterBatched.py <config_file>")
         exit(1)

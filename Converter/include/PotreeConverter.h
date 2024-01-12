@@ -195,7 +195,9 @@ inline vector<Attribute> computeOutputAttributes(Source& header) {
 
 	return list;
 }
-void parseBoundString(const std::string& boundString, Vector3 &min, Vector3 &max) {
+
+
+inline void parseBoundString(const std::string& boundString, Vector3 &min, Vector3 &max) {
     // Define the regex pattern
     std::regex pattern("\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\]");
 

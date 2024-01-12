@@ -1433,7 +1433,6 @@ namespace chunker_countsort_laszip {
 
 					max = std::max(max, value);
 				}
-				
 
 				if (unmergeable || sum > maxPointsPerChunk) {
 
@@ -1567,14 +1566,13 @@ namespace chunker_countsort_laszip {
         int batchNum = 0;
         bool isLastBatch = false;
         if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
-        if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
-        while (!fs::exists(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        }
-        MPI_Barrier(MPI_COMM_WORLD);
-        if (process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting");
         int totalFilesCounted = 0;
         while (!isLastBatch) {
+            if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
+            while (!fs::exists(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            }
+            if (process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting");
             // cout << "waiting for file" << endl;
             fstream batchfiles;
             batchfiles.open(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
@@ -1645,15 +1643,7 @@ namespace chunker_countsort_laszip {
                 }
             }
             batchNum++;
-            if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting")
-            while (!fs::exists(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
-                if (isLastBatch)
-                    break;
-                else
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-            }
-            if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting")
-
+            MPI_Barrier(MPI_COMM_WORLD);
         }
         MPI_Barrier(MPI_COMM_WORLD);
         cout << "Done counting" << endl;

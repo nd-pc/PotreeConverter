@@ -25,9 +25,9 @@ def print_nodes(file_path, start, size):
             (node_type, child_mask, numPoints, byteOffset, byteSize) = struct.unpack("<BBIQQ", data)
             if(node_type != 2):
                 points += numPoints
-                if byteOffset + byteSize > 849367283736:
-                    print("Error: byteOffset + byteSize > 849367283736" + " byteOffset: " + str(byteOffset) + " byteSize: " + str(byteSize))
-                    exit(1)
+                #if byteOffset + byteSize > 13460174264:
+                 #    print("Error: byteOffset + byteSize > 849367283736" + " byteOffset: " + str(byteOffset) + " byteSize: " + str(byteSize))
+                  #   exit(1)
                 #print("node_type", TYPE[node_type], "child_mask", bin(child_mask), "numPoints", numPoints, "byteOffset", byteOffset, "byteSize", byteSize)
         return points
 
