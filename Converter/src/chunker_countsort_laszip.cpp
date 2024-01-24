@@ -706,7 +706,6 @@ namespace chunker_countsort_laszip {
                                     << "Please try to repair the bounding box, e.g. using lasinfo with the -repair_bb argument."
                                     << endl;
                             logger::ERROR(ss.str());
-
                             exit(123);
                         }
 
@@ -1135,8 +1134,7 @@ namespace chunker_countsort_laszip {
 
 
 					logger::ERROR(ss.str());
-                    //N Ahmed: commented out for now, because it is not a critical error
-					//exit(123);
+					exit(123);
 				}
                 else
 				    counts[nodeIndex]++;
@@ -1566,7 +1564,6 @@ namespace chunker_countsort_laszip {
         int batchNum = 0;
         bool isLastBatch = false;
         if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
-        int totalFilesCounted = 0;
         while (!isLastBatch) {
             if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
             while (!fs::exists(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
@@ -1627,7 +1624,6 @@ namespace chunker_countsort_laszip {
             MPI_Barrier(MPI_COMM_WORLD);
             auto duration = now() - tStart;
             if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total counting time");
-            totalFilesCounted += sources.size();
             if (process_id == ROOT) {
                 fstream signalToCopier;
                 signalToCopier.open(
@@ -1695,8 +1691,6 @@ namespace chunker_countsort_laszip {
                 gridErrors++;
             }
         }
-        logger::INFO("Number of gridErrors: " + to_string(gridErrors));
-        logger::INFO("Total files counted: "+ to_string(totalFilesCounted));
         return lut;
     }
 

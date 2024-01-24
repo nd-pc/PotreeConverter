@@ -25,10 +25,9 @@ class SbatchScheduler(Scheduler):
         self.logger.info(f"Submitting {self.programName} sbatch job...")
         process = subprocess.run(self.programCommand, shell=True,  capture_output=True, encoding="utf-8")
         if process.returncode != 0:
-            print(self.programCommand)
-            self.printError("Something went wrong in submitting the job")
+            print(process.stderr)
+            self.logger.error("Something went wrong in submitting the job")
             exit(1)
-
 
         output = process.stdout
         self.jobId = output.split()[-1]

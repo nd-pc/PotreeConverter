@@ -265,5 +265,6 @@ struct Options {
 	bool noChunking = false;
 	bool noIndexing = false;
     string manualBounds = "";
+    int memoryBudget = getMemoryData().physical_total/(1024 * 1024 * 1024);
 
 };

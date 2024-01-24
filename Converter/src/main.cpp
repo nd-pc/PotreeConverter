@@ -42,6 +42,7 @@ Options parseArguments(int argc, char** argv) {
 	args.addArgument("title", "Page title used when generating a web page");
     args.addArgument("threads", "Number of threads to use");
     args.addArgument("bounds", "Bounds of the pointcloud to be converted. The format shoud be: [minx,maxx],[miny,maxy],[minz,maxz]. If not provided, the bounds will be computed from the input files.");
+    args.addArgument("max-mem", "Maximum memory to be used by the program in GB. If not provided, the program will use all the available memory.");
 
 	if (args.has("help")) {
 		cout << "PotreeConverter <source> -o <outdir>" << endl;
@@ -131,6 +132,7 @@ Options parseArguments(int argc, char** argv) {
     int maxThreads = (int)std::thread::hardware_concurrency();
     int threads = args.get("threads").as<int>(maxThreads);
     setNumProcessors(threads);
+    options.memoryBudget = args.get("max-mem").as<int>(getMemoryData().physical_total/(1024 * 1024 * 1024));
 
 
 	//cout << "flags: ";
@@ -532,7 +534,7 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
     indexer::Indexer indexer(targetDir);
     indexer.root = make_shared<Node>("r", stats.min, stats.max);
 
-    shared_ptr<indexer::Chunks> chunks;
+    shared_ptr<indexer::Chunks> chunks = nullptr;
     MPI_Barrier(MPI_COMM_WORLD);
     if(process_id == ROOT)RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
     auto indexDuration = 0.0;
@@ -584,8 +586,9 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
             chunker_countsort_laszip::doDistribution(stats.min, stats.max, state, lut, targetDir + "/chunks_" + to_string(process_id), sources,
                                                      outputAttributes, monitor);
 
+            MPI_Barrier(MPI_COMM_WORLD);
             distDuration += now() - tStartDist;
-            logger::INFO("Grid errors in distribution till now: " + to_string(logger::totalGridErrors));
+
             if (process_id == ROOT)  RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Distribution time");
             if (process_id == ROOT) {
                 fstream signalToCopier;
@@ -607,7 +610,7 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
                 }
             }
             miniBatchNum++;
-            MPI_Barrier(MPI_COMM_WORLD);
+
         }
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -627,9 +630,10 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
         }
         auto tStartIndex = now();
         chunks = indexing(options, targetDir + "/chunks_" + to_string(process_id), state, indexer, isLastbatch, chunkFiletoPathMap, batchNum);
+        MPI_Barrier(MPI_COMM_WORLD);
         indexDuration = now() - tStartIndex;
         if(process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Indexing time");
-        MPI_Barrier(MPI_COMM_WORLD);
+
 
         if(process_id == ROOT) {
 

@@ -12,7 +12,7 @@ import shutil
 from scheduler import SbatchScheduler
 from scheduler import LocalScheduler
 from scheduler import QsubScheduler
-from copier import LocalCopier
+from copier import ParallelCopier
 
 from loggingwrapper import LoggingWrapper
 
@@ -128,10 +128,10 @@ class PotreeConverterBatched:
             self.copierType = config["COPIER"]["CopierType"]
 
         if self.copierType == "local":
-             self.countingBatchCopier = LocalCopier(self.logger)
-             self.distributionBatchCopier = LocalCopier(self.logger)
-             self.indexingBatchCopier = LocalCopier(self.logger)
-             self.miscCopier = LocalCopier(self.logger)
+             self.countingBatchCopier = ParallelCopier(self.logger)
+             self.distributionBatchCopier = ParallelCopier(self.logger)
+             self.indexingBatchCopier =  ParallelCopier(self.logger)
+             self.miscCopier =  ParallelCopier(self.logger)
         else:
             self.logger.error("Copier type not recognized")
             exit(1)
@@ -220,6 +220,7 @@ class PotreeConverterBatched:
         ''' This function is used to concatenate the output files of the PotreeConverterMPI program after processing a partition'''
         batchCopier.concatFiles(filesToCat, destinationFile)
         batchCopier.removeFiles(filesToCat)
+
 
     def testBatchDone(self, batchCopier, signalDir, state):
         ''' This function is used to test if a batch/partition is done processing. If a batch is done processing, it will be removed from the batch dictionary and the corresponding signal files will be removed'''
@@ -311,6 +312,8 @@ class PotreeConverterBatched:
                 else:
                     break
             self.copyBatch(filesToCopy, size, self.tmpInputDir, self.distributionBatchCopier, self.tmpOutputDir + "/distribution_copy_done_signals", "distribution", partitionId)
+            self.testBatchDone(self.distributionBatchCopier, self.tmpOutputDir + "/distribution_done_signals", "distribution")
+            self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
     def counting(self):
         ''' The function to load/unload a batch of LAZ files for the counting phase of the PotreeConverterMPI program'''
 

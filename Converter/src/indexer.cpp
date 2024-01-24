@@ -724,19 +724,23 @@ namespace indexer {
         }
     }
 
-    void Indexer::waitUntilMemoryBelow(int maxMegabytes) {
+    void Indexer::waitUntilMemoryBelow(int maxGigabytes) {
         using namespace std::chrono_literals;
 
         while (true) {
             auto memoryData = getMemoryData();
-            auto usedMemoryMB = memoryData.virtual_usedByProcess / (1024 * 1024);
+            auto usedMemoryGB = memoryData.physical_usedByProcess/(1024 * 1024 * 1024);//memoryData.virtual_usedByProcess / (1024 * 1024);
 
-            if (usedMemoryMB > maxMegabytes) {
+            if (usedMemoryGB > maxGigabytes) {
+                RECORD_TIMINGS_START(recordTimings::Machine::cpu,"waitUntilMemoryBelow");
                 std::this_thread::sleep_for(10ms);
+                RECORD_TIMINGS_STOP(recordTimings::Machine::cpu,"waitUntilMemoryBelow");
+
             } else {
                 break;
             }
         }
+
     }
 
     string Indexer::createMetadata(Options options, State &state, Hierarchy hierarchy) {
@@ -2092,6 +2096,7 @@ namespace indexer {
                                 int64_t bpp = attributes.bytes;
 
                                 indexer.waitUntilWriterBacklogBelow(1'000);
+                                indexer.waitUntilMemoryBelow(options.memoryBudget);
                                 activeThreads++;
 
                                 int64_t filesize = 0;
@@ -2287,7 +2292,9 @@ namespace indexer {
 //                std::for_each(std::execution::par, tasks.begin(), tasks.end(), removeFile);
 //            }
 
-
+        if (process_id == ROOT) {
+            cout << "Current total size of FlushedChunkRoots vector in bytes is " << indexer.flushedChunkRoots.size() * 152 << endl;
+        }
 
         return chunks;
 

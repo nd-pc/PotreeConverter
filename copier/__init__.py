@@ -1,3 +1,4 @@
 
 from .copier import Copier
-from .localCopier import LocalCopier
+from .simplecopier import SimpleCopier
+from .parallelcopier import ParallelCopier
