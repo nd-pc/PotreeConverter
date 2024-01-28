@@ -116,7 +116,6 @@ Options parseArguments(int argc, char** argv) {
 	options.pageName = pageName;
 	options.pageTitle = pageTitle;
 	options.projection = projection;
-
 	options.keepChunks = keepChunks;
 	options.noChunking = noChunking;
 	options.noIndexing = noIndexing;
@@ -547,6 +546,7 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
         bool isLastminiBatchinPartition = false;
 
         auto distDuration = 0.0;
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total distribution time including copy wait time")
         while (!isLastminiBatchinPartition){
             if(process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in distribution")
             while (!fs::exists(fs::path(targetDir + "/distribution_copy_done_signals/batchno_" + to_string(miniBatchNum) + "_written"))) {
@@ -586,6 +586,7 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
             chunker_countsort_laszip::doDistribution(stats.min, stats.max, state, lut, targetDir + "/chunks_" + to_string(process_id), sources,
                                                      outputAttributes, monitor);
 
+
             MPI_Barrier(MPI_COMM_WORLD);
             distDuration += now() - tStartDist;
 
@@ -612,8 +613,8 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
             miniBatchNum++;
 
         }
-
         MPI_Barrier(MPI_COMM_WORLD);
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total distribution time including copy wait time")
         shared_ptr<map<string, vector<string>>> chunkFiletoPathMap = mapChunkstoPaths(targetDir);
         MPI_Barrier(MPI_COMM_WORLD);
 
@@ -663,6 +664,7 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
 
     }
 
+
     if(process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
 
     //cout << "Total compressed bytes in indexing is " << formatNumber(indexer.totalCompressedBytesinIndexing) << endl;
@@ -671,11 +673,13 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
     if(process_id == ROOT) {
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Final merge time");
         cout << "Final merge..." << endl;
+        auto tStartFinalMerge = now();
         finalMerge(options, targetDir, state, indexer, chunks);
+        auto finalMergeDuration = now() - tStartFinalMerge;
         cout << "Final merge done" << endl;
         fstream signalToCopier;
         signalToCopier.open(targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing_done", ios::out);
-        signalToCopier << to_string(indexDuration);//<< "\n" << "msgcomplete";
+        signalToCopier << to_string(indexDuration + finalMergeDuration);//<< "\n" << "msgcomplete";
         signalToCopier.close();
         {
             fstream().open(

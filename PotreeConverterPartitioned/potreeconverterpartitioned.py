@@ -17,9 +17,6 @@ from copier import ParallelCopier
 from loggingwrapper import LoggingWrapper
 
 
-from multiprocessing import Process
-
-
 
 
 class PotreeConverterBatched:
@@ -31,6 +28,8 @@ class PotreeConverterBatched:
         self.countingBatchSize = 0
         self.distributionBatchSize = 0
         self.lazCompressionRatio = 0
+        self.inputToOutputSizeRatio = 0
+        self.inputToTmpInputSizeRatio = 1
         self.tmpDir = ""
         self.tmpInputDir = ""
         self.tmpOutputDir = ""
@@ -39,171 +38,172 @@ class PotreeConverterBatched:
         self.lazHeadersDir = ""
         self.lazHeadersToCopy = ""
         self.partitionsCSV = ""
-        self.logger = None
         self.copierType = ""
         self.countingBatchCopier = None
         self.distributionBatchCopier = None
         self.miscCopier = None
-        self.logFile = ""
         self.batchesDone = {"counting": [], "indexing": [], "distribution": []}
         self.numFilesDone = {"counting": 0, "indexing": 0, "distribution": 0}
         self.lazFilestoProcess = []
         self.lazDistributionBatch = []
         self.programCommand = ""
         self.programName = ""
-        self.logger = None
         self.partitionsToProcess = None
         self.lazPartitions = []
 
         config = configparser.ConfigParser()
         config.read(configFile)
         sections = config.sections()
-        if "LogFile" not in config["DEFAULT"]:
-            print("Must specify a log file in the DEFAULT section of the config file")
-            exit(1)
-        else:
-            self.logFile = config["DEFAULT"]["LogFile"] + f"_{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}.log"
-            self.logger = LoggingWrapper(self.logFile)
         if "INPUT_OUTPUT" not in sections:
-            self.logger.error("INPUT_OUTPUT section not found in config file")
+            LoggingWrapper.error("INPUT_OUTPUT section not found in config file")
             exit(1)
         else:
             if "InputDir" not in config["INPUT_OUTPUT"]:
-                self.logger.error("InputDir not found in INPUT_OUTPUT section")
+                LoggingWrapper.error("InputDir not found in INPUT_OUTPUT section")
                 exit(1)
             else:
                 self.InputDir = config["INPUT_OUTPUT"]["InputDir"]
+            if "InputDirType" not in config["INPUT_OUTPUT"]:
+                LoggingWrapper.error("InputDirType not found in INPUT_OUTPUT section")
+                exit(1)
             if "OutputDir" not in config["INPUT_OUTPUT"]:
-                self.logger.error("OutputDir not found in INPUT_OUTPUT section")
+                LoggingWrapper.error("OutputDir not found in INPUT_OUTPUT section")
                 exit(1)
             else:
                 self.OutputDir = config["INPUT_OUTPUT"]["OutputDir"]
+
+
             if "LazHeadersDir" not in config["INPUT_OUTPUT"]:
-                self.logger.error("LazHeadersDir not found in INPUT_OUTPUT section")
+                LoggingWrapper.error("LazHeadersDir not found in INPUT_OUTPUT section")
                 exit(1)
             else:
                 self.lazHeadersToCopy = config["INPUT_OUTPUT"]["LazHeadersDir"]
-            if "PartitionsCSV" not in config["INPUT_OUTPUT"]:
-                self.logger.error("PartitionsCSV not found in INPUT_OUTPUT section")
+        if "PARTITIONS" not in sections:
+            LoggingWrapper.error("PARTITIONS section not found in config file")
+            exit(1)
+        else:
+            if "CSV" not in config["PARTITIONS"]:
+                LoggingWrapper.error("CSV not found in PARTITIONS section")
                 exit(1)
             else:
-                self.partitionsCSV = config["INPUT_OUTPUT"]["PartitionsCSV"]
-            if "PartitionsToProcess" in config["INPUT_OUTPUT"]:
-                self.partitionsToProcess = ast.literal_eval(config["INPUT_OUTPUT"]["PartitionsToProcess"])
+                self.partitionsCSV = config["PARTITIONS"]["CSV"]
 
+            self.countingBatchSize = eval(config["PARTITIONS"]["CountingBatchSize"])
 
         if "TMP_STORAGE" not in sections:
-            self.logger.error("TMP_STORAGE section not found in config file")
+            LoggingWrapper.error("TMP_STORAGE section not found in config file")
             exit(1)
         else:
-                if "TmpDir" not in config["TMP_STORAGE"]:
-                    self.logger.error("TmpDir not found in TMP_STORAGE section")
-                    exit(1)
+            if "TmpDir" not in config["TMP_STORAGE"]:
+                LoggingWrapper.error("TmpDir not found in TMP_STORAGE section")
+                exit(1)
+            else:
+                self.tmpDir = config["TMP_STORAGE"]["TmpDir"]
+                if config["INPUT_OUTPUT"]["InputDirType"] == "local":
+                    self.tmpInputDir = self.InputDir
+                    self.inputToTmpInputSizeRatio = 0
                 else:
-                    self.tmpDir = config["TMP_STORAGE"]["TmpDir"]
-                    self.tmpOutputDir = self.tmpDir + "/PotreeConverterMPI_Output"
-                    if "TmpInputDir" not in config["TMP_STORAGE"]:
-                        self.tmpInputDir = self.tmpDir + "/PotreeConverterMPI_InputLaz"
-                        self.lazHeadersDir = self.tmpInputDir + "_headers"
-                    else:
-                        if config["TMP_STORAGE"]["TmpInputDir"] == self.InputDir:
-                            self.tmpInputDir = self.InputDir
-                            self.lazHeadersDir = self.tmpDir + "/" + Path(self.InputDir).name + "_headers"
-                        else:
-                            self.logger.error("TmpInputDir, if specified, cannot be different from InputDir")
-
-
-                if "MaxTmpSpaceAvailable" not in config["TMP_STORAGE"]:
-                    self.logger.error(
-                        "MaxTmpSpaceAvailable not found in LOCAL_STORAGE section")
-                    exit(1)
+                    self.tmpInputDir = self.tmpDir + "/PotreeConverter_Input"
+                    self.inputToTmpInputSizeRatio = 1
+                if config["INPUT_OUTPUT"]["OutputDirType"] == "local":
+                    self.tmpOutputDir = self.OutputDir
+                    self.inputToOutputSizeRatio = 0
                 else:
-                    self.maxTmpSpaceAvailable = eval(config["TMP_STORAGE"]["MaxTmpSpaceAvailable"])
-                self.countingBatchSize = eval(config["TMP_STORAGE"]["CountingBatchSize"])
-                self.distributionBatchSize = eval(config["TMP_STORAGE"]["DistributionBatchSize"])
+                    self.tmpOutputDir = self.tmpDir + "/PotreeConverter_Output"
+                    self.inputToOutputSizeRatio = 2
+                self.lazHeadersDir = self.tmpDir + "/" + Path(self.InputDir).name + "_headers"
+            if "MaxTmpSpaceAvailable" not in config["TMP_STORAGE"]:
+                LoggingWrapper.error(
+                    "MaxTmpSpaceAvailable not found in TMP_STORAGE section")
+                exit(1)
+            else:
+                self.maxTmpSpaceAvailable = eval(config["TMP_STORAGE"]["MaxTmpSpaceAvailable"])
+            if "LazCompressionRatio" not in config["TMP_STORAGE"]:
+                LoggingWrapper.error(
+                    "LazCompressionRatio not found in TMP_STORAGE section")
+                exit(1)
+            else:
                 self.lazCompressionRatio = eval(config["TMP_STORAGE"]["LazCompressionRatio"])
-        if "COPIER" not in sections:
-            self.copierType = config["DEFAULT"]["CopierType"]
-        else:
-            self.copierType = config["COPIER"]["CopierType"]
+            if "DistributionBatchSize" not in config["TMP_STORAGE"]:
+                LoggingWrapper.error(
+                    "DistributionBatchSize not found in TMP_STORAGE section")
+                exit(1)
+            else:
+                self.distributionBatchSize = eval(config["TMP_STORAGE"]["DistributionBatchSize"])
+            if "CountingBatchSize" not in config["TMP_STORAGE"]:
+                LoggingWrapper.error(
+                    "CountingBatchSize not found in TMP_STORAGE section")
+                exit(1)
+            else:
+                self.countingBatchSize = eval(config["TMP_STORAGE"]["CountingBatchSize"])
 
-        if self.copierType == "local":
-             self.countingBatchCopier = ParallelCopier(self.logger)
-             self.distributionBatchCopier = ParallelCopier(self.logger)
-             self.indexingBatchCopier =  ParallelCopier(self.logger)
-             self.miscCopier =  ParallelCopier(self.logger)
+
+        if "COPIER" not in sections:
+            LoggingWrapper.error("COPIER section not found in config file")
+            exit(1)
         else:
-            self.logger.error("Copier type not recognized")
+            if "Type" not in config["COPIER"]:
+                LoggingWrapper.error("Type not found in COPIER section")
+                exit(1)
+            else:
+                self.copierType = config["COPIER"]["Type"]
+        if self.copierType == "cp":
+            self.countingBatchCopier = ParallelCopier()
+            self.indexingBatchCopier = ParallelCopier()
+            self.miscCopier = ParallelCopier()
+        else:
+            LoggingWrapper.error("Copier type not recognized. Must be only local")
             exit(1)
 
-        self.createPartitions()
         self.createDirectories()
 
-        if "SLURM_SCHEDULER" not in sections and "LOCAL_SCHEDULER" not in sections and "TORQUE_SCHEDULER" not in sections:
-            self.logger.error(
-                "SLURM_SCHEDULER or LOCAL_SCHEDULER or TORQUE_SCHEDULER section not found in config file")
+        if "PROGRAM" not in sections:
+            LoggingWrapper.error("PROGRAM section not found in config file")
             exit(1)
-        elif ("SLURM_SCHEDULER" in sections and "LOCAL_SCHEDULER" in sections and "TORQUE_SCHEDULER" in sections) or ("SLURM_SCHEDULER" in sections and "TORQUE_SCHEDULER" in sections or "LOCAL_SCHEDULER" in sections and "TORQUE_SCHEDULER" in sections):
-            self.logger.error(
-                "Only one scheduler can be specified in the config file: Available schedulers: SLURM_SCHEDULER, TORQUE_SCHEDULER, LOCAL_SCHEDULER")
+        else:
+            if "Path" not in config["PROGRAM"]:
+                LoggingWrapper.error("Program path not found in PROGRAM section")
+                exit(1)
+            else:
+                self.programPath = config["PROGRAM"]["Path"]
+                self.programName = config["PROGRAM"]["Path"].split("/")[-1]
+            if "Options" in config["PROGRAM"]:
+                self.programOptions = config["PROGRAM"]["Options"]
+
+
+        if "SCHEDULER" in sections:
+            if "Parameters" not in config["SCHEDULER"]:
+                LoggingWrapper.error("Parameters not found in SCHEDULER section")
+                exit(1)
+            if "Type" in config["SCHEDULER"]:
+                if config["SCHEDULER"]["Type"] == "sbatch":
+                    parameters = config["SCHEDULER"]["Parameters"]
+                    with open(self.tmpDir + "/sbatchScript.sh", "w") as sbatchScript:
+                        sbatchScript.write("#!/bin/sh\n\n")
+                        sbatchScript.write("#SBATCH " + parameters + "\n\n")
+                        sbatchScript.write(self.programPath +  " " + self.programOptions + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir)
+                    programCommand = shutil.which("sbatch") + " " + self.tmpDir + "/sbatchScript.sh"
+                    self.scheduler = SbatchScheduler(programCommand, self.programName)
+                elif config["SCHEDULER"]["Type"] == "pbs":
+                    parameters = config["SCHEDULER"]["Parameters"]
+                    with open(self.tmpDir + "/qsubScript.sh", "w") as qsubScript:
+                        qsubScript.write("#!/bin/sh\n\n")
+                        qsubScript.write("#PBS " + parameters + "\n\n")
+                        qsubScript.write(self.programPath + " " + self.programOptions + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir)
+                    programCommand = shutil.which("qsub") + " " + self.tmpDir + "/qsubScript.sh"
+                    self.scheduler = QsubScheduler(programCommand, self.programName)
+                elif config["SCHEDULER"]["Type"] == "local":
+                    programCommand = self.programPath + " " + self.programOptions + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir
+                    self.scheduler = LocalScheduler(programCommand, self.programName)
+                else:
+                    LoggingWrapper.error("Scheduler type not recognized. Must be one of sbatch, pbs or local")
+                    exit(1)
+            else:
+                LoggingWrapper.error("Scheduler type not found in SCHEDULER section")
+                exit(1)
+        else:
+            LoggingWrapper.error("SCHEDULER section not found in config file")
             exit(1)
-        elif "SLURM_SCHEDULER" in sections:
-
-            if "ProgramPath" not in config["SLURM_SCHEDULER"]:
-                self.logger.error("ProgramPath not found in SLURM_SCHEDULER section")
-                exit(1)
-            if "ProgramName" in config["SLURM_SCHEDULER"]:
-                self.programName = config["SLURM_SCHEDULER"]["ProgramName"]
-            else:
-                self.programName = config["SLURM_SCHEDULER"]["ProgramPath"].split("/")[-1]
-
-            sbatchParameters = config["SLURM_SCHEDULER"]["SbatchParameters"]
-            with open(self.tmpDir + "/sbatchScript.sh", "w") as sbatchScript:
-                sbatchScript.write("#!/bin/sh\n\n")
-                if "SbatchParameters" in config["SLURM_SCHEDULER"]:
-                    sbatchScript.write("#SBATCH " + sbatchParameters + "\n\n")
-                sbatchScript.write(shutil.which("mpiexec") + " " + config["SLURM_SCHEDULER"]["ProgramPath"] + " " +
-                                   config["SLURM_SCHEDULER"][
-                                       "ConverterOptions"] + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir)
-            self.programCommand = shutil.which("sbatch") + " " + self.tmpDir + "/sbatchScript.sh"
-            self.scheduler = SbatchScheduler(self.programCommand, self.programName, self.logger)
-        elif "LOCAL_SCHEDULER" in sections:
-            if "ProgramPath" not in config["SLURM_SCHEDULER"]:
-                self.logger.error("ProgramPath not found in LOCAL_SCHEDULER section")
-                exit(1)
-            if "ProgramName" in config["LOCAL_SCHEDULER"]:
-                self.programName = config["LOCAL_SCHEDULER"]["ProgramName"]
-            else:
-                self.programName = config["SLURM_SCHEDULER"]["ProgramPath"].split("/")[-1]
-            self.programCommand = shutil.which("mpiexec") + " " + config["LOCAL_SCHEDULER"]["MPIEXECParameters"] + " " + \
-                                  config["LOCAL_SCHEDULER"]["ProgramPath"] + " " + config["LOCAL_SCHEDULER"][
-                                      "ConverterOptions"] + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir
-            self.scheduler = LocalScheduler(self.programCommand, self.programName, self.logger)
-        elif "TORQUE_SCHEDULER" in sections:
-
-            if "ProgramPath" not in config["TORQUE_SCHEDULER"]:
-                self.logger.error("ProgramPath not found in TORQUE_SCHEDULER section")
-                exit(1)
-            if "ProgramName" in config["TORQUE_SCHEDULER"]:
-                self.programName = config["TORQUE_SCHEDULER"]["ProgramName"]
-            else:
-                self.programName = config["TORQUE_SCHEDULER"]["ProgramPath"].split("/")[-1]
-
-            nTasks = 0
-            if "Ntasks" in config["TORQUE_SCHEDULER"]:
-                nTasks = int(config["TORQUE_SCHEDULER"]["Ntasks"])
-            else:
-                self.logger.error("Ntasks not found in TORQUE_SCHEDULER section")
-            qsubParameters = config["TORQUE_SCHEDULER"]["QsubParameters"]
-            with open(self.tmpDir + "/qsubScript.sh", "w") as qsubScript:
-                qsubScript.write("#!/bin/sh\n\n")
-                if "QsubParameters" in config["TORQUE_SCHEDULER"]:
-                    qsubScript.write("#PBS " + qsubParameters + "\n\n")
-                qsubScript.write(shutil.which("mpiexec") + "-n " + str(nTasks) + " " + config["TORQUE_SCHEDULER"]["ProgramPath"] + " " +
-                                   config["TORQUE_SCHEDULER"][
-                                       "ConverterOptions"] + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir)
-            self.programCommand = shutil.which("qsub") + " " + self.tmpDir + "/qsubScript.sh"
-            self.scheduler = QsubScheduler(self.programCommand, self.programName, self.logger)
 
 
     def bordered(self, text):
@@ -217,13 +217,22 @@ class PotreeConverterBatched:
         return '\n'.join(res)
 
     def catFiles(self, filesToCat, destinationFile, batchCopier):
-        ''' This function is used to concatenate the output files of the PotreeConverterMPI program after processing a partition'''
+        ''' This function is used to concatenate the output files of the PotreeConverterMPI program after processing a partition
+        :param filesToCat: The list of files to concatenate
+        :param destinationFile: The destination file
+        :param batchCopier: The copier object
+        '''
+
         batchCopier.concatFiles(filesToCat, destinationFile)
         batchCopier.removeFiles(filesToCat)
 
 
     def testBatchDone(self, batchCopier, signalDir, state):
-        ''' This function is used to test if a batch/partition is done processing. If a batch is done processing, it will be removed from the batch dictionary and the corresponding signal files will be removed'''
+        ''' This function is used to test if a batch/partition is done processing. If a batch is done processing, it will be removed from the batch dictionary and the corresponding signal files will be removed
+        :param batchCopier: The copier object
+        :param signalDir: The directory where to read the signal files from the PotreeConverterMPI program
+        :param state: The state of the processing (counting, indexing or distribution)
+        '''
         if state == "indexing" or state == "distribution":
             partitionorbatch = "Partition"
         else:
@@ -237,7 +246,7 @@ class PotreeConverterBatched:
             duration = float(durationStr)
             signalFile.close()
             if (durationStr != "-1.0"):
-                self.logger.info(partitionorbatch + "-" + str(
+                LoggingWrapper.info(partitionorbatch + "-" + str(
                 batchCopier.getPartitionNum(batchNum)) + " done " + state + " in " + str(
                 duration) + " seconds", color="green")
             if state == "distribution":
@@ -262,7 +271,7 @@ class PotreeConverterBatched:
             done = ",".join(self.batchesDone[state])
             if state == "distribution":
                 pending = ",".join(map(lambda x: str(x) + "(in partition-" + str(batchCopier.getPartitionNum(x)) + ")", batchCopier.getCopiedBatchNums()))
-            self.logger.info(state.capitalize() +  " pending for " + partitionorbatch.lower() + "s: " + pending + ". Done " + partitionorbatch.lower() + "s: " + done)
+            LoggingWrapper.info(state.capitalize() +  " pending for " + partitionorbatch.lower() + "s: " + pending + ". Done " + partitionorbatch.lower() + "s: " + done)
     def copyBatch(self, filesToCopy, size, destination, batchCopier, signalDir, state, partition=""):
         ''' This function is used to copy a batch/partition to the temporary input directory.
         :param filesToCopy: The list of files to copy
@@ -317,11 +326,11 @@ class PotreeConverterBatched:
     def counting(self):
         ''' The function to load/unload a batch of LAZ files for the counting phase of the PotreeConverterMPI program'''
 
-        self.logger.info("Batch copier for counting started", color="blue", bold=True)
+        LoggingWrapper.info("Batch copier for counting started", color="blue", bold=True)
         for partition in self.lazPartitions:
             if partition["status"] == "skip":
                 continue
-            self.lazFilestoProcess.extend(partition["files"])#glob.glob(self.InputDir + "/*.[lL][aA][zZ]")
+            self.lazFilestoProcess.extend(partition["files"])
 
         while self.lazFilestoProcess:  # loop until all files are copied
             if self.countingBatchCopier.gettotalSize() < self.maxTmpSpaceAvailable:
@@ -344,56 +353,47 @@ class PotreeConverterBatched:
             self.testBatchDone(self.countingBatchCopier, self.tmpOutputDir + "/counting_done_signals", "counting")
             time.sleep(60)
 
-        self.logger.info("Counting finished. Total " + str(
+        LoggingWrapper.info("Counting finished. Total " + str(
             self.numFilesDone["counting"]) + " files counted in " + str(
             len(self.batchesDone["counting"])) + " batches.", color="green", bold=True)
         self.lazFilestoProcess.clear()
 
     def indexing(self):
         '''The function to load/unload a batch of LAZ files for the indexing phase of the PotreeConverterMPI program'''
-        self.logger.info("Batch copier for indexing started", color="blue", bold=True)
+        LoggingWrapper.info("Batch copier for indexing started", color="blue", bold=True)
         self.lazFilestoProcess = self.lazPartitions.copy()
         self.lazFilestoProcess.sort(key=lambda x: x["size"])
         skipPartitions = []
-        indexingDone = []
-        numFilesdone = 0
-        numBatches = 0
         totalBatches = len(self.lazFilestoProcess)
         while self.lazFilestoProcess:  # loop until all files are copied
-            #if self.indexingBatchCopier.gettotalSize() < self.maxTmpSpaceAvailable:
             currbatches = self.lazFilestoProcess.copy()
             for lazBatch in currbatches:
                 if lazBatch["status"] == "skip":
                     skipPartitions.append(lazBatch)
                     self.lazFilestoProcess.remove(lazBatch)
-                    self.logger.warning("Skipping partition " + str(lazBatch["id"]) + ". Too big for max tmp space allowed, size: " + str(lazBatch["size"]) + " bytes, Tmp space available: " + str(self.maxTmpSpaceAvailable) + " bytes, Tmp space requrired: + " + str((self.lazCompressionRatio + 2 + 1) * lazBatch["size"]) +" bytes")
+                    LoggingWrapper.warning("Skipping partition " + str(lazBatch["id"]) + ". Too big for max tmp space allowed, size: " + str(lazBatch["size"]) + " bytes, Tmp space available: " + str(self.maxTmpSpaceAvailable) + " bytes, Tmp space requrired: + " + str((self.lazCompressionRatio + 2 + 1) * lazBatch["size"]) +" bytes")
                     continue
                 copiedBatchNums = self.indexingBatchCopier.getCopiedBatchNums()
                 if not copiedBatchNums:
-                    spaceUtilization = lazBatch["size"] * (self.lazCompressionRatio + 2 + 1)
+                    spaceUtilization = lazBatch["size"] * (self.lazCompressionRatio + self.inputToOutputSizeRatio + self.inputToTmpInputSizeRatio)
                 elif len(copiedBatchNums) == 1:
                     currBatchSize = self.indexingBatchCopier.gettotalSize()
                     #Assuming that the currBatch is immediately removed before distributiion phase of nextBatch get start
-                    spaceUtilization = (currBatchSize * 2) + (lazBatch["size"] * 2) + (lazBatch["size"] * self.lazCompressionRatio)
+                    spaceUtilization = (currBatchSize * self.inputToOutputSizeRatio) + (lazBatch["size"] * self.inputToOutputSizeRatio) + (lazBatch["size"] * self.lazCompressionRatio)
                 else:
                     currBatchSize = self.indexingBatchCopier.getBatchSize(heapq.nsmallest(2, copiedBatchNums)[0])
                     nextBatchSize = self.indexingBatchCopier.getBatchSize(heapq.nsmallest(2, copiedBatchNums)[1])
                     #Assuming that the currBatch is immediately removed before distributiion phase of nextBatch get start
-                    spaceUtilization = (currBatchSize * 2) + (nextBatchSize * (self.lazCompressionRatio + 2)) + lazBatch["size"] + self.indexingBatchCopier.gettotalSize()
+                    spaceUtilization = (currBatchSize * self.inputToOutputSizeRatio) + (nextBatchSize * (self.lazCompressionRatio + self.inputToOutputSizeRatio)) + lazBatch["size"] + self.indexingBatchCopier.gettotalSize()
 
-                # if not self.indexingBatchCopier.getCopiedBatchNums():
-                #     nextBatchSize = 0
-                #
-                # else:
-                #     nextBatchSize = self.indexingBatchCopier.getBatchSize(min(self.indexingBatchCopier.getCopiedBatchNums()))
-                #if ((nextBatchSize*self.lazCompressionRatio) + (self.indexingBatchCopier.gettotalSize() - nextBatchSize + lazBatch["size"])) <= self.maxTmpSpaceAvailable:
                 if spaceUtilization <= self.maxTmpSpaceAvailable:
                     batchToCopy = lazBatch.copy()
                     self.lazFilestoProcess.remove(lazBatch)
 
-                    self.copyBatch([], batchToCopy["size"], self.tmpInputDir, self.indexingBatchCopier,
-                      self.tmpOutputDir + "", "indexing", batchToCopy["id"])
+
                     self.distribution(batchToCopy["files"], batchToCopy["id"])
+                    self.copyBatch([], batchToCopy["size"], self.tmpInputDir, self.indexingBatchCopier,
+                                   self.tmpOutputDir + "", "indexing", batchToCopy["id"])
                 self.testBatchDone(self.distributionBatchCopier, self.tmpOutputDir + "/distribution_done_signals", "distribution")
                 self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
 
@@ -403,7 +403,7 @@ class PotreeConverterBatched:
             if not self.indexingBatchCopier.isbatchDictEmpty():
                 self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
             time.sleep(60)
-        self.logger.info("Indexing finished. Total " + str(
+        LoggingWrapper.info("Indexing finished. Total " + str(
             self.numFilesDone["indexing"]) + " files indexed in " + str(
             len(self.batchesDone["indexing"])) + " partitions. Total " + str(totalBatches) + " partitions, " + str(
             len(skipPartitions)) +  " skipped" , color="green", bold=True)
@@ -426,7 +426,7 @@ class PotreeConverterBatched:
 
     def createPartitions(self):
         ''' This function is used to create the partitions from the partitions CSV file. The partitions are created based on the size of the LAZ files and the max tmp space available. The partitions are stored in the lazPartitions list'''
-        self.logger.info("Creating partitions...", color="blue", bold=True)
+        LoggingWrapper.info("Creating partitions...", color="blue", bold=True)
         lazfileStats = {}
         with open(self.partitionsCSV, "r", newline='') as partitionFile:
             partition = csv.reader(partitionFile)
@@ -458,20 +458,20 @@ class PotreeConverterBatched:
                 filesinPartition["status"] = "do"
             else:
                 filesinPartition["status"] = "skip"
-                self.logger.warning(f"Partition {id} too big for max tmp space allowed. It will be skipped. Size: {str(partitionSize)} bytes, Tmp space available: {str(self.maxTmpSpaceAvailable)} bytes, Tmp space requrired: {str((self.lazCompressionRatio + 2 + 1) * partitionSize)} bytes")
+                LoggingWrapper.warning(f"Partition {id} too big for max tmp space allowed. It will be skipped. Size: {str(partitionSize)} bytes, Tmp space available: {str(self.maxTmpSpaceAvailable)} bytes, Tmp space requrired: {str((self.lazCompressionRatio + 2 + 1) * partitionSize)} bytes")
 
             self.lazPartitions.append(filesinPartition)
-        self.logger.info("Done creating partitions. Total partitions: " + str(len(self.lazPartitions)), color="green", bold=True)
+        LoggingWrapper.info("Done creating partitions. Total partitions: " + str(len(self.lazPartitions)), color="green", bold=True)
 
 
     def createDirectories(self):
         ''' This function is used to create the directories for the PotreeConverterMPI program. It also copies the headers to the temporary directory'''
-        self.logger.info("Creating directories...", color="blue", bold=True)
+        LoggingWrapper.info("Creating directories...", color="blue", bold=True)
         if not Path(self.InputDir).exists():
-            self.logger.error("Input directory " + self.InputDir + " does not exist")
+            LoggingWrapper.error("Input directory " + self.InputDir + " does not exist")
             exit(1)
         elif not Path(self.lazHeadersToCopy).exists():
-            self.logger.error("Headers directory " + self.lazHeadersToCopy + " does not exist")
+            LoggingWrapper.error("Headers directory " + self.lazHeadersToCopy + " does not exist")
             exit(1)
 
 
@@ -479,12 +479,12 @@ class PotreeConverterBatched:
             print("Directory "  + self.tmpDir  + " for temporarily storing partial input and output already exists. Do you want to overwrite it? (y/n)")
             answer = input()
             if answer == "y" or answer == "Y":
-                self.logger.info("Removing directory " + self.tmpDir + " for temporarily storing partial input and output...")
+                LoggingWrapper.info("Removing directory " + self.tmpDir + " for temporarily storing partial input and output...")
                 shutil.rmtree(self.tmpDir)
             else:
-                self.logger.info("Directory " + self.tmpDir + " for temporarily storing partial input and output already exists. Exiting on user request... ")
+                LoggingWrapper.info("Directory " + self.tmpDir + " for temporarily storing partial input and output already exists. Exiting on user request... ")
                 exit(1)
-        self.logger.info("Creating directory " + self.tmpDir + " for temporarily storing partial input and output...")
+        LoggingWrapper.info("Creating directory " + self.tmpDir + " for temporarily storing partial input and output...")
         Path(self.tmpDir).mkdir()
         if self.tmpInputDir != self.InputDir:
             Path(self.tmpInputDir).mkdir()
@@ -494,39 +494,38 @@ class PotreeConverterBatched:
             print("Output directory " + self.OutputDir + " already exists. Do you want to overwrite it? (y/n)")
             answer = input()
             if answer == "y" or answer == "Y":
-                self.logger.info("Removing output directory " + self.OutputDir + "...")
+                LoggingWrapper.info("Removing output directory " + self.OutputDir + "...")
                 shutil.rmtree(self.OutputDir)
             else:
-                self.logger.info(
+                LoggingWrapper.info(
                     "Output directory " + self.OutputDir + " already exists. Exiting on user request... ")
                 exit(1)
-        self.logger.info("Creating output directory " + self.OutputDir + "...")
+        LoggingWrapper.info("Creating output directory " + self.OutputDir + "...")
         Path(self.OutputDir).mkdir()
-        self.logger.info("Creating directory " + self.lazHeadersDir + " for temporarily storing headers...")
+        LoggingWrapper.info("Creating directory " + self.lazHeadersDir + " for temporarily storing headers...")
         Path(self.lazHeadersDir).mkdir()
         lazHeaders = []
         for entry in self.lazPartitions:
             lazHeaders.extend(map(lambda x: self.lazHeadersToCopy + "/" + Path(x).stem + ".json", entry["files"]))
-        self.logger.info("Copying headers...", color="blue", bold=True)
+        LoggingWrapper.info("Copying headers...", color="blue", bold=True)
         self.miscCopier.copyFiles(lazHeaders, self.lazHeadersDir)
         pathsCount = 0
         for path in glob.glob(self.lazHeadersDir + "/*.json"):
             if not glob.glob(self.InputDir + "/" + Path(path).stem + ".[lL][aA][zZ]"):
-                self.logger.error("LAZ file for " + Path(path).name + " in the input directory " + self.InputDir + " does not exist")
+                LoggingWrapper.error("LAZ file for " + Path(path).name + " in the input directory " + self.InputDir + " does not exist")
                 exit(1)
             pathsCount += 1
         if pathsCount == 0:
-            self.logger.error("No LAZ files to process in the input directory")
+            LoggingWrapper.error("No LAZ files to process in the input directory")
             exit(1)
-        #self.miscCopier.copyFiles(glob.glob(self.lazHeadersToCopy + "/*.json"), self.lazHeadersDir)
-        self.logger.info("Done copying headers", color="green", bold=True)
+        LoggingWrapper.info("Done copying headers", color="green", bold=True)
         Path(self.tmpOutputDir + "/counting_copy_done_signals").mkdir()
         Path(self.tmpOutputDir + "/indexing_copy_done_signals").mkdir()
         Path(self.tmpOutputDir + "/distribution_copy_done_signals").mkdir()
         Path(self.tmpOutputDir + "/counting_done_signals").mkdir()
         Path(self.tmpOutputDir + "/indexing_done_signals").mkdir()
         Path(self.tmpOutputDir + "/distribution_done_signals").mkdir()
-        self.logger.info("Done creating directories", color="green", bold=True)
+        LoggingWrapper.info("Done creating directories", color="green", bold=True)
 
     def removeDirectories(self, directories):
         ''' This function is used to remove the directories'''
@@ -534,65 +533,3 @@ class PotreeConverterBatched:
             shutil.rmtree(directory)
 
 
-def PotreeConverterMPIBatchedCopier(potreeConverterBatched):
-    potreeConverterBatched.counting()
-    potreeConverterBatched.indexing()
-
-    exit(0)
-
-if __name__ == "__main__":
-
-    if len(sys.argv) != 2:
-        print("Usage: python3 PotreeConverterBatched.py <config_file>")
-        exit(1)
-    configFilePath = sys.argv[1]
-    potreeConverterBatched = PotreeConverterBatched(configFilePath)
-    potreeConverterBatched.logger.info("Starting PotreeConverterMPI Batched", color="blue", bold=True)
-    #potreeConverterBatched.createDirectories()
-    potreeConverterBatched.scheduler.launchJob()
-
-    # PotreeConverterMPIMonitorProcess = Process(target=potreeConverterBatched.scheduler.monitorJob)
-    # PotreeConverterMPIMonitorProcess.start()
-    PotreeConverterMPICopier = Process(target=PotreeConverterMPIBatchedCopier, args=(potreeConverterBatched,))
-    PotreeConverterMPICopier.start()
-
-    while potreeConverterBatched.scheduler.isJobAlive() and PotreeConverterMPICopier.is_alive():
-        time.sleep(10)
-
-    if potreeConverterBatched.scheduler.isJobAlive() and PotreeConverterMPICopier.exitcode != 0 :
-        potreeConverterBatched.logger.error("Batch copier failed")
-        potreeConverterBatched.scheduler.killJob()
-        exit(1)
-    elif potreeConverterBatched.scheduler.getJobExitCode() != 0 and PotreeConverterMPICopier.is_alive():
-        parent = psutil.Process(PotreeConverterMPICopier.pid)
-        for child in parent.children(recursive=True):
-            child.kill()
-        PotreeConverterMPICopier.terminate()
-        potreeConverterBatched.logger.info("Batch copier terminated")
-        exit(1)
-    elif potreeConverterBatched.scheduler.getJobExitCode() != 0 and PotreeConverterMPICopier.exitcode != 0:
-        potreeConverterBatched.logger.error("Batch copier and PotreeConverterMPI  failed")
-        exit(1)
-    elif potreeConverterBatched.scheduler.isJobAlive()  and PotreeConverterMPICopier.exitcode == 0:
-        potreeConverterBatched.logger.info("Batch copier finished successfully. Waiting for PotreeConverterMPI to finish...", color="green")
-        while potreeConverterBatched.scheduler.isJobAlive():
-            time.sleep(10)
-        if potreeConverterBatched.scheduler.getJobExitCode() != 0:
-            potreeConverterBatched.logger.error("PotreeConverterMPI failed. However, batch copier finished successfully")
-            exit(1)
-        else:
-            potreeConverterBatched.logger.info("Batch copier and PotreeConverterMPI finished successfully", color="green", bold=True)
-    elif potreeConverterBatched.scheduler.getJobExitCode() == 0 and PotreeConverterMPICopier.is_alive():
-        potreeConverterBatched.logger.info("PotreeConverterMPI finished successfully. Waiting for batch copier to finish...", color="green")
-        while PotreeConverterMPICopier.is_alive():
-            time.sleep(10)
-        if PotreeConverterMPICopier.exitcode != 0:
-            potreeConverterBatched.logger.error("Batch copier failed. However, PotreeConverterMPI finished successfully")
-            exit(1)
-        else:
-            potreeConverterBatched.logger.info("Batch copier  and PotreeConverterMPI finished successfully", color="green", bold=True)
-    else:
-        potreeConverterBatched.logger.info("Batch copier and PotreeConverterMPI finished successfully", color="green", bold=True)
-
-        # potreeConverterBatched.logger.info("Removing directories for batch copier")
-        # potreeConverterBatched.removeDirectories([potreeConverterBatched.tmpInputDir, potreeConverterBatched.lazHeadersDir])

@@ -2,18 +2,17 @@ from datetime import datetime
 import logging
 from logging.handlers import RotatingFileHandler
 
-
+from ..loggingwrapper import LoggingWrapper
 
 class Scheduler:
-    def __init__(self, programCommand, programName, log):
+    """Abstract class for job schedulers"""
+    def __init__(self, programCommand, programName):
         self.programCommand = programCommand
         self.programName = programName
         self.process = None
         self.jobId = None
-        self.logger = log
         self.jobStatus = None
         self.exitCode = None
-
 
 
     def launchJob(self):

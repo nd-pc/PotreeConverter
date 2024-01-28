@@ -1,23 +1,15 @@
 import subprocess
-import time
 from multiprocessing import Process
 import psutil
 from scheduler import Scheduler
 
+from ..loggingwrapper import LoggingWrapper
 
-# ANSI escape codes for text color formatting
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
 
 
 
 class LocalScheduler(Scheduler):
-
+    """Class for local job scheduler"""
     def runProgram(self):
         programCommandStatus = subprocess.run(self.programCommand, shell=True,capture_output=True, encoding="utf-8")
         self.exitCode = programCommandStatus.returncode
@@ -26,44 +18,53 @@ class LocalScheduler(Scheduler):
         elif self.jobStatus != "KILLED":
             self.jobStatus = "FAILED"
         exit(programCommandStatus.returncode)
-        #if programCommandStatus.returncode != 0 :
-         #   self.printError("Error ruuning the program command: " + programCommandStatus.stderr)
-          #  exit(1)
     def launchJob(self):
-        self.logger.info("Launching + " + self.programName + "...")
+        """Launches the job"""
+        LoggingWrapper.info("Launching + " + self.programName + "...")
         self.process = Process(target=self.runProgram)
         self.process.start()
         self.jobId = self.process.pid
         #self.process = subprocess.Popen(self.programCommand, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True, encoding="utf-8")
 
-        self.logger.info("Launched " + self.programName + " process with process id:" + str(self.process.pid))
+        LoggingWrapper.info("Launched " + self.programName + " process with process id:" + str(self.process.pid))
+
 
     def isJobAlive(self):
+        """Checks if the job is alive
+        :return: True if the job is alive, False otherwise"""
         if self.process and self.process.is_alive():
             return True
         else:
             return False
-
     def getJobStatus(self):
+        """Returns the job status
+        :return: the job status"""
         if self.process and self.process.is_alive():
             return "RUNNING"
         else:
             return self.jobStatus
 
     def getJobExitCode(self):
-          return self.exitCode
+        """Returns the job exit code
+        :return: the job exit code"""
+        return self.exitCode
 
     def getJobId(self):
+        """Returns the job id
+        :return: the job id"""
         return self.jobId
 
     def killJob(self):
+        """Kills the job"""
         if self.process and self.process.is_alive():
             self._terminateProcessAndChildren(self.process.pid)
-            self.logger.info(self.programName + " job and all its child processes terminated")
+            LoggingWrapper.info(self.programName + " job and all its child processes terminated")
         else:
-            self.logger.error("No " + self.programName + " job running to terminate")
+            LoggingWrapper.error("No " + self.programName + " job running to terminate")
 
     def _terminateProcessAndChildren(self, pid):
+        """Terminates the process and all its children
+        :param pid: the process id"""
         previousJobStatus = self.jobStatus
         try:
             self.jobStatus = "KILLED"

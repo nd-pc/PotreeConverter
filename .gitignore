@@ -90,4 +90,8 @@ outputs/
 rsync_PotreeConverterMPI.sh
 watchers.xml
 *.csv
-partitions
+PotreeConverterPartitioned/partitions/ahn3_C69_partitions_1x1.csv
+PotreeConverterPartitioned/partitions/ahn3_partitions_1x1.csv
+PotreeConverterPartitioned/partitions/ahn3_partitions_4x4_part_7.csv
+PotreeConverterPartitioned/partitions/file_partition.csv
+PotreeConverterPartitioned/partitions/ahn3_partitions_4x4.csv
