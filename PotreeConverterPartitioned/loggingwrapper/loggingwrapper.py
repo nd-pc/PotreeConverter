@@ -12,7 +12,7 @@ class LoggingWrapper:
     BOLD = '\033[1m'
     ENDC = '\033[0m'
 
-    log_formatter = logging.Formatter(BOLD + BLUE + '[POTREECONVERTERMPI] ' + ENDC + '%(asctime)s - %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M')
+    log_formatter = logging.Formatter(BOLD + BLUE + '[PotreeConverterMPI] ' + ENDC + '%(asctime)s - %(levelname)s: %(message)s', datefmt='%Y-%m-%d %H:%M')
     logger = logging.getLogger('logger')
     logger.setLevel(logging.DEBUG)
 

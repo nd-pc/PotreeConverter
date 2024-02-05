@@ -580,8 +580,6 @@ namespace chunker_countsort_laszip {
 			int64_t numToRead = task->numPoints;
             //point data record length
 			int64_t bpp = task->bpp;
-			//Vector3 scale = task->scale;
-			//Vector3 offset = task->offset;
 			Vector3 min = task->min;
 			Vector3 max = task->max;
 
@@ -591,13 +589,10 @@ namespace chunker_countsort_laszip {
 			ss << "counting " << fs::path(task->path).filename().string() 
 				<< ", first point: " << formatNumber(task->firstPoint)
 				<< ", num points: " << formatNumber(task->numPoints);
-			// cout << ss.str();
-			// monitor->print("counter message", ss.str());
 
 			logger::INFO(ss.str());
 			
-			
-            // never uses it here
+
 			thread_local unique_ptr<void, void(*)(void*)> buffer(nullptr, free);
 			thread_local int64_t bufferSize = -1;
 
@@ -628,7 +623,6 @@ namespace chunker_countsort_laszip {
             }
 
             {
-                //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
                 laszip_POINTER laszip_reader;
                 laszip_header *header;
                 laszip_point *point;
@@ -643,7 +637,6 @@ namespace chunker_countsort_laszip {
                 laszip_get_point_pointer(laszip_reader, &point);
                 laszip_seek_point(laszip_reader, task->firstPoint);
 
-                //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
 
                 auto attributeHandlers = createAttributeHandlers(header, data, point, inputAttributes,
                                                                  outputAttributesCopy, state);
@@ -668,14 +661,10 @@ namespace chunker_countsort_laszip {
 
                     int64_t pointOffset = i * bpp;
 
-                    //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
 
                     laszip_read_point(laszip_reader);
                     laszip_get_coordinates(laszip_reader, coordinates);
 
-                    //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "LAZ read+decompress time in counting");
-
-                    //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in updating counting grid");
                     {
 
                         // transfer las integer coordinates to new scale/offset/box values
@@ -718,7 +707,6 @@ namespace chunker_countsort_laszip {
                         grid[index]++;
 
 
-                        //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
                         aPosition->min.x = std::min(aPosition->min.x, x);
                         aPosition->min.y = std::min(aPosition->min.y, y);
                         aPosition->min.z = std::min(aPosition->min.z, z);
@@ -726,17 +714,13 @@ namespace chunker_countsort_laszip {
                         aPosition->max.x = std::max(aPosition->max.x, x);
                         aPosition->max.y = std::max(aPosition->max.y, y);
                         aPosition->max.z = std::max(aPosition->max.z, z);
-                        //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
                     }
 
-                    //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in updating counting grid");
 
                     // for each attribute, compute min/max and histogram
-                    //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
                     for (auto& handler : attributeHandlers) {
                         handler(pointOffset);
                     }
-                    //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting to compute min/max and histogram");
 
                 }
 
@@ -744,7 +728,6 @@ namespace chunker_countsort_laszip {
                 laszip_destroy(laszip_reader);
             }
             // merge attribute metadata of this batch into global attribute metadata
-            //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting for merging attribute metadata of this batch into global attribute metadata")
             for (int i = 0; i < outputAttributesCopy.list.size(); i++) {
                 Attribute& source = outputAttributesCopy.list[i];
                 Attribute& target = outputAttributes.list[i];
@@ -758,13 +741,11 @@ namespace chunker_countsort_laszip {
                 target.max.y = std::max(target.max.y, source.max.y);
                 target.max.z = std::max(target.max.z, source.max.z);
 
-                // target.mask = target.mask | source.mask;
 
                 for(int j = 0; j < target.histogram.size(); j++){
                     target.histogram[j] = target.histogram[j] + source.histogram[j];
                 }
             }
-            //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting for merging attribute metadata of this batch into global attribute metadata")
 
 			static int64_t pointsProcessed = 0;
 			pointsProcessed += task->numPoints;
@@ -774,7 +755,6 @@ namespace chunker_countsort_laszip {
 			state.duration = now() - tStart;
 
 
-			//cout << ("end: " + formatNumber(dbgCurr)) << endl;
 		};
 
         auto numChunkerThreads = getCpuData().numProcessors;
@@ -782,16 +762,12 @@ namespace chunker_countsort_laszip {
 
 		auto tStartTaskAssembly = now();
 
-        //RECORD_TIMINGS_PARALLEL();
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in counting for creating tasks")
         vector<shared_ptr<Task>> tasks;
 		for (auto source : sources) {
-		//auto parallel = std::execution::par;
-		//for_each(parallel, paths.begin(), paths.end(), [&mtx, &sources](string path) {
 
 			laszip_POINTER laszip_reader;
 			laszip_header* header;
-			//laszip_point* point;
 			{
 				laszip_create(&laszip_reader);
 
@@ -814,6 +790,7 @@ namespace chunker_countsort_laszip {
             vector<Source> tmpSources = { source };
             Attributes inputAttributes = computeOutputAttributes(tmpSources, {});
 
+            // create a task for each batch of points to be processed
 			while (pointsLeft > 0) {
 
 				int64_t numToRead;
@@ -864,26 +841,16 @@ namespace chunker_countsort_laszip {
 			laszip_destroy(laszip_reader);
 		}
 
-
-        //auto parallel = std::execution::par_unseq;
-        //sort(parallel, tasks.begin(), tasks.end(),
-          //   [](shared_ptr<Task> a, shared_ptr<Task> b) { return a->numPoints > b->numPoints; });
+        // distribute the tasks to compute node
         unsigned int tasks_per_node = tasks.size() / n_processes ? (tasks.size() / n_processes) + 1 :tasks.size() / n_processes;
         for (int i = process_id * tasks_per_node; i < (process_id + 1) * tasks_per_node && i < tasks.size(); i++) {
             pool.addTask(tasks[i]);
         }
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in counting for creating tasks")
-        //for (int i = process_id; i < tasks.size(); i += n_processes) {
-         //   pool.addTask(tasks[i]);
-        //}
-
-		//printElapsedTime("tStartTaskAssembly", tStartTaskAssembly);
-
 		pool.waitTillEmpty();
 		pool.close();
 
 
-		//printElapsedTime("countPointsInCells", tStart);
 
 		double duration = now() - tStart;
 
@@ -935,7 +902,6 @@ namespace chunker_countsort_laszip {
         auto numFlushThreads = getCpuData().numProcessors;
 		writer = new ConcurrentWriter(numFlushThreads, state);
 
-		//printElapsedTime("distributePoints0", tStart);
 
 		vector<std::atomic_int32_t> counters(nodes.size());
 
@@ -954,7 +920,6 @@ namespace chunker_countsort_laszip {
 
 		mutex mtx_push_point;
 
-		//printElapsedTime("distributePoints1", tStart);
 
 		auto processor = [&mtx_push_point, &counters, chunksDir, &state, tStart, &outputAttributes](shared_ptr<Task> task) {
 
@@ -1049,21 +1014,12 @@ namespace chunker_countsort_laszip {
 						memcpy(data + offset + 4, &Y, 4);
 						memcpy(data + offset + 8, &Z, 4);
 
-						/*aPosition->min.x = std::min(aPosition->min.x, x);
-						aPosition->min.y = std::min(aPosition->min.y, y);
-						aPosition->min.z = std::min(aPosition->min.z, z);
-
-						aPosition->max.x = std::max(aPosition->max.x, x);
-						aPosition->max.y = std::max(aPosition->max.y, y);
-						aPosition->max.z = std::max(aPosition->max.z, z);*/
 					}
 
 					// copy other attributes
-                    //RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in distributing points to compute min/max and histogram");
 					for (auto& handler : attributeHandlers) {
 						handler(offset);
 					}
-                    //RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in distributing points to compute min/max and histogram");
 
 				}
 
@@ -1177,34 +1133,12 @@ namespace chunker_countsort_laszip {
 			auto tAddBuckets = now();
 			addBuckets(chunksDir, buckets);
 
-//			// merge attribute metadata of this batch into global attribute metadata
-//			for (int i = 0; i < outputAttributesCopy.list.size(); i++) {
-//				Attribute& source = outputAttributesCopy.list[i];
-//				Attribute& target = outputAttributes.list[i];
-//
-//				lock_guard<mutex> lock(mtx_attributes);
-//				target.min.x = std::min(target.min.x, source.min.x);
-//				target.min.y = std::min(target.min.y, source.min.y);
-//				target.min.z = std::min(target.min.z, source.min.z);
-//
-//				target.max.x = std::max(target.max.x, source.max.x);
-//				target.max.y = std::max(target.max.y, source.max.y);
-//				target.max.z = std::max(target.max.z, source.max.z);
-//
-//				// target.mask = target.mask | source.mask;
-//
-//				for(int j = 0; j < target.histogram.size(); j++){
-//					target.histogram[j] = target.histogram[j] + source.histogram[j];
-//				}
-//			}
 
 		};
         auto numChunkerThreads = getCpuData().numProcessors;
 		TaskPool<Task> pool(numChunkerThreads, processor);
 
 
-
-        //RECORD_TIMINGS_PARALLEL();
         vector<shared_ptr<Task>> tasks;
 		for (auto source: sources) {
 
@@ -1227,7 +1161,7 @@ namespace chunker_countsort_laszip {
 
 			vector<Source> tmpSources = { source };
 			Attributes inputAttributes = computeOutputAttributes(tmpSources, {});
-
+            // create a task for each batch of points to be processed
 			while (pointsLeft > 0) {
 
 				int64_t numToRead;
@@ -1245,7 +1179,6 @@ namespace chunker_countsort_laszip {
 				task->lut = &lut;
 				task->firstPoint = numRead;
 				task->path = source.path;
-				//task->scale = { header->x_scale_factor, header->y_scale_factor, header->z_scale_factor };
 				task->scale = outputAttributes.posScale;
 				task->offset = outputAttributes.posOffset;
 				task->min = min;
@@ -1253,7 +1186,6 @@ namespace chunker_countsort_laszip {
 				task->inputAttributes = inputAttributes;
 
                  tasks.push_back(task);
-				//pool.addTask(task);
 
 				numRead += numToRead;
 			}
@@ -1263,19 +1195,12 @@ namespace chunker_countsort_laszip {
 
 		}
 
-        /*auto parallel = std::execution::par_unseq;
-        sort(parallel, tasks.begin(), tasks.end(),
-             [](shared_ptr<Task> a, shared_ptr<Task> b) { return a->batchSize > b->batchSize; });
-
-        for (int i = process_id; i < tasks.size(); i += n_processes) {
-            pool.addTask(tasks[i]);
-        }*/
+        // distribute the tasks to compute node
         unsigned int tasks_per_node = tasks.size() / n_processes ? (tasks.size() / n_processes) + 1 :tasks.size() / n_processes;
         for (int i = process_id * tasks_per_node; i < (process_id + 1) * tasks_per_node && i < tasks.size(); i++) {
             pool.addTask(tasks[i]);
         }
 
-        //printElapsedTime("tStartTaskAssembly", tStartTaskAssembly);
 
         pool.waitTillEmpty();
 
@@ -1502,7 +1427,7 @@ namespace chunker_countsort_laszip {
 
     void findGlobalAttrMinMax(Attributes& outputAttributes){
 
-        //outputAttributes.print(cout);
+        // This function is used to find the global min/max for the attributes
         for (int i = 0; i < outputAttributes.list.size(); i++) {
             std::vector<uint8_t> serializedAttribute = serializeAttribute(outputAttributes.list[i]);
             // Allocate memory for receiving the serialized data from other ranks
@@ -1510,9 +1435,6 @@ namespace chunker_countsort_laszip {
 
             MPI_Allgather(serializedAttribute.data(), serializedAttribute.size(), MPI_BYTE,
                           receivedData.data(), serializedAttribute.size(), MPI_BYTE, MPI_COMM_WORLD);
-            // Use MPI_Alltoall to exchange the serialized data
-            //MPI_Alltoall(serializedAttribute.data(), serializedAttribute.size(), MPI_BYTE,
-            //receivedData.data(), serializedAttribute.size(), MPI_BYTE, MPI_COMM_WORLD);
 
             for (int j = 0; j < n_processes; j++) {
                 if (j == process_id)
@@ -1564,28 +1486,18 @@ namespace chunker_countsort_laszip {
         int batchNum = 0;
         bool isLastBatch = false;
         if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
+        // Loop through all the batches
         while (!isLastBatch) {
             if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in counting");
+            // wait until a batch is not copied
             while (!fs::exists(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             }
             if (process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in counting");
-            // cout << "waiting for file" << endl;
             fstream batchfiles;
+            // the batchno_batchNum_copied file is written by the copier. It contains the list of laz files that are to be processed in this batch
+            // the second line of the file contains the type of the batch: lastbatch or notlastbatch
             batchfiles.open(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
-//            string line2 = "";
-//            while (line2 != "notlastbatch" && line2 != "lastbatch"){
-//                // cout << "waiting for file" << endl
-//                //batchfiles.open(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
-//                string line1;
-//                getline(batchfiles, line1);
-//                getline(batchfiles, line2);
-//                batchfiles.seekg(0, ios::beg); // go back to the beginning of the file to re-read the first line
-//                //batchfiles.close();
-//                std::this_thread::sleep_for(std::chrono::milliseconds(10));
-//            }
-//            //batchfiles.open(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied", ios::in);
-//            batchfiles.seekg(0, ios::beg);
             string lazFiles;
             getline(batchfiles, lazFiles);
             string lastBatch;
@@ -1606,8 +1518,6 @@ namespace chunker_countsort_laszip {
 
             batchfiles.close();
 
-            //fs::remove(fs::path(targetDir + "/counting_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"));
-
 
 
 
@@ -1624,12 +1534,13 @@ namespace chunker_countsort_laszip {
             MPI_Barrier(MPI_COMM_WORLD);
             auto duration = now() - tStart;
             if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total counting time");
+            // write the time taken to count the batch to a file. This file acts as a signal for partition loader /unloader script
             if (process_id == ROOT) {
                 fstream signalToCopier;
                 signalToCopier.open(
                         targetDir + "/counting_done_signals/batchno_" + to_string(batchNum) + "_counting_done",
                         ios::out);
-                signalToCopier << to_string(duration);//<< "\n" << "msgcomplete";
+                signalToCopier << to_string(duration);
                 signalToCopier.close();
                 {
                     fstream().open(
@@ -1643,10 +1554,8 @@ namespace chunker_countsort_laszip {
         }
         MPI_Barrier(MPI_COMM_WORLD);
         cout << "Done counting" << endl;
-        flush(cout);
         if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu,  "Total time spent in counting including waiting for copying");
         cout << "Summing up counting grids of all MPI processes..." << endl;
-        flush(cout);
         if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in summing up the counting grids of all MPI processes");
         // Temporary buffer with compatible data type (int)
         std::vector<int> tempBuffer(grid.size());
@@ -1665,15 +1574,11 @@ namespace chunker_countsort_laszip {
         }
         if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total time spent in summing up the counting grids of all MPI processes");
         cout << "Done summing up counting grids of all MPI processes" << endl;
-        flush(cout);
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "time spent in finding global min/max for the attributes")
         cout << "Finding global min/max for the attributes..." << endl;
-        flush(cout);
         findGlobalAttrMinMax(outputAttributes);
         cout << "Done finding global min/max for the attributes" << endl;
-        flush(cout);
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "time spent in finding global min/max for the attributes")
-        //MPI_Barrier(MPI_COMM_WORLD);
 
         string metadataPath = targetDir + "/chunks_" + to_string(process_id) + "/metadata.json";
         double cubeSize = ceil((max - min).max());
@@ -1697,9 +1602,9 @@ namespace chunker_countsort_laszip {
 
      void doDistribution(Vector3 min, Vector3 max, State& state, NodeLUT lut, string chunksDir, vector<Source> sources, Attributes &outputAttributes, Monitor* monitor) {
 			state.currentPass = 2;
-            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "distribution time");
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "distribution time of" + to_string(process_id));
 			distributePoints(sources, min, max, chunksDir, lut, state, outputAttributes, monitor);
-            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "distribution time");
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "distribution time of" + to_string(process_id));
 
 	}
 

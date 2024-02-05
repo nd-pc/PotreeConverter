@@ -1,7 +1,7 @@
 # About
 This is a fork of the original PotreeConverter 2.0. The original repository can be found [here](https://github.com/potree/PotreeConverter).
 
-The main branch contains the MPI implementation  of the PotreeConverter. The storage requirement for PotreeConverter is:
+The main branch contains the MPI implementation  of the PotreeConverter known as PotreeConverterMPI. The storage requirement for PotreeConverter is:
 ```angular2html
 input_data_size + temporary_data_size + output_data_size
 temporary_data_size = input_data_size * LAZ_compression_ratio
@@ -15,6 +15,10 @@ output_data_size = 2 * input_data_size
 Therefore, the strorage requirement for the PotreeConverter is about 13 times the input data size. THe MPI implementation of the PotreeConverter reduces the storage requirement by partitioning the input data and processing the partitions. The partitions are merged to generate the final output. The storag requirement for the MPI implementation is
 13 times the size of the largest partition.
 
+
+### Requirements
+The implementation is tested with OpenMPI 4.1.1 which implements the MPI 3.1 standard. It may work with other MPI implementations that support the MPI 3.1 standard, but it is not guaranteed. Other requirements are the same as the original PotreeConverter.
+The tool is designed to run on a cluster with SLURM or PBS scheduler.
 
 
 ### Building PotreeConverterMPI
@@ -35,7 +39,7 @@ The tool is built in the `build` directory. The executable is named `PotreeConve
 
 ### Running PotreeConverterMPI
 
-The tools is designed to run on a clsuter with SLURM or PBS scheduler. The cluster has a login node to submit jobs and multiple compute nodes. Run the follwoing command on the login node in the root directory of the repository:
+The tool is designed to run on a cluster with SLURM or PBS scheduler. The cluster has a login node to submit jobs and multiple compute nodes. Run the follwoing command on the login node in the root directory of the repository:
 
 ```bash
 python3 PotreeConverterPartitioned/run_PotreeConverterBatch.py <path to INI configuration file>

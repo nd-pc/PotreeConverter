@@ -55,7 +55,6 @@ using namespace std;
     public:
         Record_timings(int tid) : tid(tid) {}
 
-
         void start_timing(Machine t, const string &desc, const int line_start, const string &file_name) {
 
             struct time_record_all rec;
@@ -367,56 +366,7 @@ using namespace std;
 
     }
 
-    /*void
-    find_parent(const int i, const string &parent_desc, vector<tuple<string, float>> &parent_times,
-                vector<time_record_to_save> &timeStamps) {
-        if (i >= timeStamps.size()) return;
-        if (timeStamps[i].desc == parent_desc) {
-            parent_times.push_back(make_tuple(parent_desc, timeStamps[i].time_diff));
-            find_parent(i + 1, timeStamps[i].parent_desc, parent_times, timeStamps);
-        } else {
-            find_parent(i + 1, parent_desc, parent_times, timeStamps);
-        }
 
-    }
-
-    void print_timings(ostream &stream, vector<time_record_to_save> &timeStamps) {
-
-        for (int i = 0; i < timeStamps.size(); i++) {
-            if (timeStamps[i].level != 0)
-                find_parent(i + 1, timeStamps[i].parent_desc, timeStamps[i].parent_times, timeStamps);
-            //stream << timeStamps[i].desc << ":" << timeStamps[i].parent_desc << endl;
-
-        }
-        stream << "=========================Record_timings results=================================" << endl;
-
-        for (auto idx = timeStamps.cend() - 1; idx >= timeStamps.cbegin(); idx--) {
-            for (int i = 0; i < idx->parent_times.size(); i++) {
-                stream << "\t";
-            }
-            stream << "Time spent in \"" << idx->desc << "\" on " << (idx->t == Machine::cpu ? "CPU" : "GPU") << ": "
-                   << idx->time_diff << "ms";
-            if (!idx->parent_times.empty()) {
-                stream << " (";
-                for (int i = 0; i < idx->parent_times.size(); i++) {
-                    if (get<1>(idx->parent_times[i]) > 0) {
-                        stream << (idx->time_diff / get<1>(idx->parent_times[i])) * 100 << "% of "
-                               << get<0>(idx->parent_times[i]);
-                        if (i > idx->parent_times.size() - 1) stream << ", ";
-                    }
-                }
-                stream << ")";
-            }
-            if (idx->flops > 0) {
-                stream << " GFLOPS: " << ((double) idx->flops / (double) 1e9) / (idx->time_diff * 1e-3);
-            }
-            stream << endl;
-        }
-
-        stream << "================================================================================" << endl;
-
-
-    }*/
 
 
     static inline float get_process_time(){
@@ -425,8 +375,6 @@ using namespace std;
             char buff[128];
             char *p;
             float uptime = 0.0, process_time;
-            //struct timeval tv;
-            //static time_t process_time;
 
 
             if ((fd = open("/proc/uptime", 0)) != -1)
@@ -434,9 +382,6 @@ using namespace std;
                 if (read(fd, buff, sizeof(buff)) > 0)
                 {
                     uptime = strtof(buff, &p);
-                    //gettimeofday(&tv, 0);
-                    //now = tv.tv_sec;
-                    //boottime = tv.tv_sec - uptime;
 
                 }
                 else {
@@ -459,7 +404,7 @@ using namespace std;
             procFile.open(process_path);
 
             char str[255];
-            procFile.getline(str, 255);  // delim defaults to '\n'
+            procFile.getline(str, 255);
 
 
             vector<string> tmp;
@@ -468,7 +413,6 @@ using namespace std;
                  istream_iterator<string>(),
                  back_inserter<vector<string> >(tmp));
 
-            //process_time = (now - boottime) - (atof(tmp.at(21).c_str()))/HZ;
 
             process_time = uptime - (atof(tmp.at(21).c_str()))/HZ;
 

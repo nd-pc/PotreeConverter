@@ -359,7 +359,7 @@ class PotreeConverterBatched:
         self.lazFilestoProcess.clear()
 
     def indexing(self):
-        '''The function to load/unload a batch of LAZ files for the indexing phase of the PotreeConverterMPI program'''
+        '''The function to load/unload a batch of LAZ files for the distribution and indexing phase of the PotreeConverterMPI program'''
         LoggingWrapper.info("Batch copier for indexing started", color="blue", bold=True)
         self.lazFilestoProcess = self.lazPartitions.copy()
         self.lazFilestoProcess.sort(key=lambda x: x["size"])
@@ -371,16 +371,16 @@ class PotreeConverterBatched:
                 if lazBatch["status"] == "skip":
                     skipPartitions.append(lazBatch)
                     self.lazFilestoProcess.remove(lazBatch)
-                    LoggingWrapper.warning("Skipping partition " + str(lazBatch["id"]) + ". Too big for max tmp space allowed, size: " + str(lazBatch["size"]) + " bytes, Tmp space available: " + str(self.maxTmpSpaceAvailable) + " bytes, Tmp space requrired: + " + str((self.lazCompressionRatio + 2 + 1) * lazBatch["size"]) +" bytes")
+                    LoggingWrapper.warning("Skipping partition " + str(lazBatch["id"]))
                     continue
                 copiedBatchNums = self.indexingBatchCopier.getCopiedBatchNums()
-                if not copiedBatchNums:
+                if not copiedBatchNums: # if no batch is waiting to be processed
                     spaceUtilization = lazBatch["size"] * (self.lazCompressionRatio + self.inputToOutputSizeRatio + self.inputToTmpInputSizeRatio)
-                elif len(copiedBatchNums) == 1:
+                elif len(copiedBatchNums) == 1: # if a batch is already being indexed
                     currBatchSize = self.indexingBatchCopier.gettotalSize()
                     #Assuming that the currBatch is immediately removed before distributiion phase of nextBatch get start
                     spaceUtilization = (currBatchSize * self.inputToOutputSizeRatio) + (lazBatch["size"] * self.inputToOutputSizeRatio) + (lazBatch["size"] * self.lazCompressionRatio)
-                else:
+                else: #if a batch is already being indexed and others are waiting
                     currBatchSize = self.indexingBatchCopier.getBatchSize(heapq.nsmallest(2, copiedBatchNums)[0])
                     nextBatchSize = self.indexingBatchCopier.getBatchSize(heapq.nsmallest(2, copiedBatchNums)[1])
                     #Assuming that the currBatch is immediately removed before distributiion phase of nextBatch get start
@@ -389,8 +389,6 @@ class PotreeConverterBatched:
                 if spaceUtilization <= self.maxTmpSpaceAvailable:
                     batchToCopy = lazBatch.copy()
                     self.lazFilestoProcess.remove(lazBatch)
-
-
                     self.distribution(batchToCopy["files"], batchToCopy["id"])
                     self.copyBatch([], batchToCopy["size"], self.tmpInputDir, self.indexingBatchCopier,
                                    self.tmpOutputDir + "", "indexing", batchToCopy["id"])

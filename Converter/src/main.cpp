@@ -86,7 +86,6 @@ Options parseArguments(int argc, char** argv) {
 
 	outdir = fs::weakly_canonical(fs::path(outdir)).string();
     headerDir = fs::weakly_canonical(fs::path(headerDir)).string();
-	//vector<string> flags = args.get("flags").as<vector<string>>();
 
 	vector<string> attributes = args.get("attributes").as<vector<string>>();
 
@@ -110,7 +109,6 @@ Options parseArguments(int argc, char** argv) {
 	options.method = method;
 	options.encoding = encoding;
 	options.chunkMethod = chunkMethod;
-	//options.flags = flags;
 	options.attributes = attributes;
 	options.generatePage = generatePage;
 	options.pageName = pageName;
@@ -134,50 +132,12 @@ Options parseArguments(int argc, char** argv) {
     options.memoryBudget = args.get("max-mem").as<int>(getMemoryData().physical_total/(1024 * 1024 * 1024));
 
 
-	//cout << "flags: ";
-	//for (string flag : options.flags) {
-	//	cout << flag << ", ";
-	//}
-	//cout << endl;
+
 
 	return options;
 }
 
-/*struct Curated{
-	string name;
-	vector<Source> files;
-};
-Curated curateSources(vector<string> paths) {
 
-
-	cout << "#paths: " << paths.size() << endl;
-
-	vector<Source> sources;
-	sources.reserve(paths.size());
-
-	mutex mtx;
-	auto parallel = std::execution::par;
-	for_each(parallel, paths.begin(), paths.end(), [&mtx, &sources](string path) {
-
-		auto header = loadLasHeader(path);
-		//auto filesize = fs::file_size(path);
-
-		Vector3 min = { header.min.x, header.min.y, header.min.z };
-		Vector3 max = { header.max.x, header.max.y, header.max.z };
-
-		Source source;
-		source.path = path;
-		source.min = min;
-		source.max = max;
-		source.numPoints = header.numPoints;
-		source.filesize = header.numPoints * header.pointDataRecordLength;
-
-		lock_guard<mutex> lock(mtx);
-		sources.push_back(source);
-	});
-
-	return sources;
-}*/
 
 
 
@@ -267,33 +227,7 @@ vector<Source> curateHeaders(string headerDir) {
 
 
     return std::move(sources);
-    /*Vector3 min = { Infinity , Infinity , Infinity };
-    Vector3 max = { -Infinity , -Infinity , -Infinity };
 
-    for(auto headerFile : headerFiles){
-        auto header = loadLasHeader(headerFile);
-        min.x = std::min(min.x, header.min.x);
-        min.y = std::min(min.y, header.min.y);
-        min.z = std::min(min.z, header.min.z);
-
-        max.x = std::max(max.x, header.max.x);
-        max.y = std::max(max.y, header.max.y);
-        max.z = std::max(max.z, header.max.z);
-
-        Vector3 min = { header.min.x, header.min.y, header.min.z };
-        Vector3 max = { header.max.x, header.max.y, header.max.z };
-
-        Source<SourceFileType::HEADER> source;
-        source.path = headerFile;
-        source.min = min;
-        source.max = max;
-        source.numPoints = header.numPoints;
-        source.filesize = header.headerSize;
-
-        headers.push_back(source);
-    }
-
-    return {min, max};*/
 
 }
 
@@ -371,74 +305,14 @@ Stats computeStats(vector<Source> headers, string boundString) {
 	return { min, max, totalBytes, totalPoints };
 }
 
-// struct Monitor {
-// 	thread t;
-// 	bool stopRequested = false;
 
-// 	void stop() {
-
-// 		stopRequested = true;
-
-// 		t.join();
-// 	}
-// };
-
-// shared_ptr<Monitor> startMonitoring(State& state) {
-
-// 	shared_ptr<Monitor> monitor = make_shared<Monitor>();
-
-// 	monitor->t = thread([monitor, &state]() {
-
-// 		using namespace std::chrono_literals;
-
-// 		std::this_thread::sleep_for(1'000ms);
-
-// 		while (!monitor->stopRequested) {
-
-// 			auto ram = getMemoryData();
-// 			auto CPU = getCpuData();
-// 			double GB = 1024.0 * 1024.0 * 1024.0;
-
-// 			double throughput = (double(state.pointsProcessed) / state.duration) / 1'000'000.0;
-
-// 			double progressPass = 100.0 * state.progress();
-// 			double progressTotal = (100.0 * double(state.currentPass - 1) + progressPass) / double(state.numPasses);
-
-// 			string strProgressPass = formatNumber(progressPass) + "%";
-// 			string strProgressTotal = formatNumber(progressTotal) + "%";
-// 			string strTime = formatNumber(now()) + "s";
-// 			string strDuration = formatNumber(state.duration) + "s";
-// 			string strThroughput = formatNumber(throughput) + "MPs";
-
-// 			string strRAM = formatNumber(double(ram.virtual_usedByProcess) / GB, 1)
-// 				+ "GB (highest " + formatNumber(double(ram.virtual_usedByProcess_max) / GB, 1) + "GB)";
-// 			string strCPU = formatNumber(CPU.usage) + "%";
-
-// 			stringstream ss;
-// 			ss << "[" << strProgressTotal << ", " << strTime << "], "
-// 				<< "[" << state.name << ": " << strProgressPass << ", duration: " << strDuration << ", throughput: " << strThroughput << "]"
-// 				<< "[RAM: " << strRAM << ", CPU: " << strCPU << "]";
-
-// 			cout << ss.str() << endl;
-
-// 			std::this_thread::sleep_for(1'000ms);
-// 		}
-
-// 	});
-
-// 	return monitor;
-// }
 shared_ptr<indexer::Chunks> indexing(Options& options, string chunksDir, State& state, indexer::Indexer& indexer, bool islastbatch, shared_ptr<map<string, vector<string>>> chunkFiletoPathMap, int batchNum) {
 
     if (options.noIndexing) {
         return nullptr;
     }
 
-    /*if(task_num == ROOT) {
 
-    }
-    string wait = "waiting";
-    MPI_Send(wait.c_str(), wait.length(),MPI_CHAR, ROOT, 0, MPI_COMM_WORLD);*/
     if (options.method == "random") {
 
         SamplerRandom sampler;
@@ -464,11 +338,6 @@ shared_ptr<indexer::Chunks> indexing(Options& options, string chunksDir, State& 
 void finalMerge(Options& options, string targetDir, State& state, indexer::Indexer& indexer, shared_ptr<indexer::Chunks> chunks) {
 
 
-    /*if(task_num == ROOT) {
-
-    }
-    string wait = "waiting";
-    MPI_Send(wait.c_str(), wait.length(),MPI_CHAR, ROOT, 0, MPI_COMM_WORLD);*/
     if (options.method == "random") {
 
         SamplerRandom sampler;
@@ -488,6 +357,7 @@ void finalMerge(Options& options, string targetDir, State& state, indexer::Index
 }
 
 shared_ptr<map<string, vector<string>>> mapChunkstoPaths(string targetDir){
+    // Traverse through the "chunk_<process_id>" directories and create a map of chunk file names to the paths of the chunk files.
     shared_ptr<map<string, vector<string>>> chunkFiletoPathMap = make_shared<map<string, vector<string>>>();
     for (int i = 0; i < n_processes; i++) {
         for (auto& entry : fs::directory_iterator(targetDir + "/" + "chunks_" + to_string(i))) {
@@ -538,21 +408,23 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
     if(process_id == ROOT)RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
     auto indexDuration = 0.0;
     int miniBatchNum = 0;
+    // Loop until all the batches are processed. In distribution + indexing a batch is a partition.
+    // For distribution, a partition is subdivided into mini-batches to overlap copying and processing.
     while (!isLastbatch) {
-        // cout << "waiting for file" << endl;
-
-
-
         bool isLastminiBatchinPartition = false;
 
         auto distDuration = 0.0;
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total distribution time including copy wait time")
+        // Loop until all the mini-batches in a partition are processed.
         while (!isLastminiBatchinPartition){
             if(process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in distribution")
+            // Wait for the copying of the mini-batch to be done.
             while (!fs::exists(fs::path(targetDir + "/distribution_copy_done_signals/batchno_" + to_string(miniBatchNum) + "_written"))) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
             }
             if(process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in distribution")
+            // The batchno_miniBatchNum_copied file is written by the copier after copying the mini-batch. It contains the list of laz files in the mini-batch.
+            // The second line in the file is "lastminibatchinpartition" if the mini-batch is the last mini-batch in the partition, otherwise it is "notlastminibatchinpartition".
             fstream batchfiles;
             batchfiles.open(targetDir + "/distribution_copy_done_signals/batchno_" + to_string(miniBatchNum) + "_copied", ios::in);
             string lazFiles;
@@ -591,16 +463,17 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
             distDuration += now() - tStartDist;
 
             if (process_id == ROOT)  RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Distribution time");
+            // Write the distribution done signal file. It contains the duration of the distribution.
             if (process_id == ROOT) {
                 fstream signalToCopier;
                 signalToCopier.open(
                         targetDir + "/distribution_done_signals/batchno_" + to_string(miniBatchNum) + "_distribution_done",
                         ios::out);
                 if (isLastminiBatchinPartition) {
-                    signalToCopier << to_string(distDuration);//<< "\n" << "msgcomplete";
+                    signalToCopier << to_string(distDuration);
                 }
                 else {
-                    signalToCopier << "-1.0";//<< "\n" << "msgcomplete";
+                    signalToCopier << "-1.0";
                 }
                 signalToCopier.close();
                 {
@@ -615,10 +488,15 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
         }
         MPI_Barrier(MPI_COMM_WORLD);
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total distribution time including copy wait time")
+        // In distribution, it may be possible that  a chunk file may have been partially wriiten by mutliple processes.
+        // Som traverse through the "chunk_<process_id>" directories and create a map of chunk file names to the paths of the chunk files.
+        // In the indexing phase, the chunk file paths are used to read the chunk files and index them.
+        // The files with the same name are treated as a single chunk file.
         shared_ptr<map<string, vector<string>>> chunkFiletoPathMap = mapChunkstoPaths(targetDir);
         MPI_Barrier(MPI_COMM_WORLD);
 
         if(process_id == ROOT)RECORD_TIMINGS_START (recordTimings::Machine::cpu, "wait time for concatenating octree files");
+        // Beore indexing, wait until the output of the previous partitions is concatenated to octree.bin. We allow atmost output of two partitions to remain in the temporary storage.
         while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-2) + "_concatenated")) && ((batchNum - 2) >= 0)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
@@ -626,7 +504,6 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
         MPI_Barrier(MPI_COMM_WORLD);
 
         if(process_id == ROOT) {
-            //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
             RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing time");
         }
         auto tStartIndex = now();
@@ -649,26 +526,15 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
                             ios::out);
                 }
             }
-            //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_copied"));
         }
         batchNum++;
-        //if(process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
-        /*while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum) + "_written"))) {
-            if (isLastbatch)
-                break;
-            else
-                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        }*/
         MPI_Barrier(MPI_COMM_WORLD);
-        //if(process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Indexing and distribution copy wait time")
 
     }
 
 
     if(process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
 
-    //cout << "Total compressed bytes in indexing is " << formatNumber(indexer.totalCompressedBytesinIndexing) << endl;
-    //cout << "Total bytes written to octree file in indexing is " << formatNumber(indexer.totalBytesWrittenToOctreeFileinIndexing) << endl;
 
     if(process_id == ROOT) {
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Final merge time");
@@ -679,7 +545,7 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
         cout << "Final merge done" << endl;
         fstream signalToCopier;
         signalToCopier.open(targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing_done", ios::out);
-        signalToCopier << to_string(indexDuration + finalMergeDuration);//<< "\n" << "msgcomplete";
+        signalToCopier << to_string(indexDuration + finalMergeDuration);
         signalToCopier.close();
         {
             fstream().open(
@@ -692,29 +558,12 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         }
         RECORD_TIMINGS_STOP (recordTimings::Machine::cpu, "wait time for concatenating octree files");
-        //fs::remove(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated"));
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
 }
 
-/*void MPIchunkDistributor(string targetDir){
-
-    thread t([targetDir]() {
-
-        vector<string> allChunkFiles;
-        for (const auto& entry : fs::directory_iterator(targetDir)) {
-            string filename = entry.path().filename().string();
-            allChunkFiles.push_back(filename);
-        }
-        int done = 0;
-        while (done < allChunkFiles.size()){
-        }
-
-    });
-    t.detach();
-}*/
 
 
 
@@ -821,9 +670,6 @@ void generatePage(string exePath, string pagedir, string pagename) {
 #include "HierarchyBuilder.h"
 
 
-
-//map<pid_t, recordTimings::Record_timings> thread_time_record_map;\
-//map<string, vector<pid_t>> desc_thread_map;
 
 int n_processes, process_id;
 
