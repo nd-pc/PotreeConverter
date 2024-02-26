@@ -92,7 +92,7 @@
 	"files.trimTrailingWhitespace": false,
 	"editor.autoIndent": "advanced",
 	"editor.detectIndentation": false,
-	"editor.insertSpaces": false,
+	"editor.insertSpaces": true,
 	"editor.minimap.enabled": false,
 	"editor.autoClosingBrackets": "never",
 	"editor.formatOnType": false,
