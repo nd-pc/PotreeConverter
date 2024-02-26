@@ -21,7 +21,7 @@ def PotreeConverterMPIBatchedCopier(potreeConverterBatched):
 
 
 if __name__ == "__main__":
-    '''The run script fpr PotreeConverterMPI. It creates the directories, launches the job and monitors it.'''
+    '''The run script for PotreeConverterMPI. It creates the directories, launches the job and monitors it.'''
 
     if len(sys.argv) != 2:
         LoggingWrapper.error("Usage: python3 run_PotreeConverterBatched.py <path to config.ini file>")
