@@ -119,7 +119,7 @@ add_custom_command(
 		$<TARGET_FILE_DIR:${PROJECT_NAME}>/licenses/license_potree_converter.txt)
 
 add_custom_command(
-	TARGET PotreeConverterMPI POST_BUILD
+	TARGET ${target} POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy
 		${PROJECT_SOURCE_DIR}/README.md
 		$<TARGET_FILE_DIR:${PROJECT_NAME}>/README.md)
