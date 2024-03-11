@@ -17,6 +17,7 @@
 
 using std::unique_lock;
 
+
 namespace indexer {
 
     constexpr int hierarchyStepSize = 4;
@@ -150,6 +151,10 @@ namespace indexer {
             return strID;
         };
 
+        /*Since achunk may be splitted into multiple files with same name and but different directories,
+        chunkFiletoPathMap contains a map of chunkID to a list of paths to the files that make up the chunk
+         The following loop creates a list of chunks to load from the map
+         */
         vector<shared_ptr<Chunk>> chunksToLoad;
         for (auto const &[key, paths]: *chunkFiletoPathMap) {
             //cout << key << " : " << val << endl;
@@ -172,7 +177,7 @@ namespace indexer {
 
                 for (int i = 1; i < chunkID.size(); i++) {
                     int index = chunkID[i] - '0'; // this feels so wrong...
-
+                    // find the bounding box of a chunk
                     box = childBoundingBoxOf(box.min, box.max, index);
                 }
 
@@ -1913,7 +1918,7 @@ namespace indexer {
         cout << "=== INDEXING                           " << endl;
         cout << "=======================================" << endl;
 
-
+        auto tStart = now();
         state.name = "INDEXING";
         state.currentPass = 3;
         state.pointsProcessed = 0;
@@ -1965,6 +1970,7 @@ namespace indexer {
         }
 
         int64_t pointsProcessed = 0;
+        double lastReport = now();
 
         auto writeAndUnload = [&indexer](Node *node) {
             indexer.writer->writeAndUnload(node);
@@ -1978,7 +1984,7 @@ namespace indexer {
         cout << "Number of Chunks: " << chunks->list.size() << endl;
 
         TaskPool<Task> pool(numThreads,
-                            [&onNodeCompleted, &onNodeDiscarded, &writeAndUnload, &state, &options, &activeThreads, &totalPoints, totalBytes, &pointsProcessed, chunks, &indexer, &nodes, &mtx_nodes, &sampler](
+                            [&onNodeCompleted, &onNodeDiscarded, &writeAndUnload, &state, &options, &activeThreads, &tStart, &lastReport, &totalPoints, totalBytes, &pointsProcessed, chunks, &indexer, &nodes, &mtx_nodes, &sampler](
                                     auto task) {
 
 
@@ -2043,6 +2049,15 @@ namespace indexer {
                                 }*/
 
                                 lock_guard<mutex> lock(mtx_nodes);
+                                pointsProcessed = pointsProcessed + numPoints;
+
+
+                                if (now() - lastReport > 1.0) {
+                                    state.pointsProcessed = pointsProcessed;
+                                    state.duration = now() - tStart;
+
+                                    lastReport = now();
+                                }
 
 
                                 nodes.push_back(chunkRoot);
@@ -2119,6 +2134,7 @@ namespace indexer {
             indexer.currentTotalOctreeFileSize = indexer.processOctreeFileOffset + indexer.octreeFileSize;
         }
 
+        // processOctreeFileOffset is added to the bytoffset of each node to get the final byteoffset of the node in the octree.bin file
         indexer.hierarchyFlusher->flush(hierarchyStepSize, indexer.processOctreeFileOffset);
 
         if(!islastbatch){
@@ -2152,20 +2168,38 @@ namespace indexer {
 
 
 
-        printElapsedTime("Indexing completed by process " + std::to_string(process_id) + " in", tStartIndexing);
+
 
 
         if (process_id == ROOT) {
             cout << "Current total size of FlushedChunkRoots vector in bytes is " << indexer.flushedChunkRoots.size() * 152 << endl;
         }
 
+
+
         return chunks;
 
 
     }
 
+
     void doFinalMerge(Indexer &indexer, shared_ptr<Chunks> chunks, string targetDir, Sampler &sampler, Options &options,
                       State &state) {
+
+        cout << endl;
+        cout << "=======================================" << endl;
+        cout << "=== FINAL MERGE                           " << endl;
+        cout << "=======================================" << endl;
+
+        auto tStart = now();
+        state.name = "FINAL MERGE";
+        state.currentPass = 4;
+        state.pointsProcessed = 0;
+        state.bytesProcessed = 0;
+        state.duration = 0;
+
+        int64_t pointsProcessed = 0;
+        double lastReport = now();
 
         //indexer.indexer_state = "final_merge";
         auto onNodeCompleted = [&indexer](Node *node) {
@@ -2185,7 +2219,7 @@ namespace indexer {
 
             auto tasks = indexer.processChunkRoots();
 
-
+            int64_t numPoints = 0;
             for (auto &task: tasks) {
 
                 for (auto &fcr: task.fcrs) {
@@ -2193,10 +2227,19 @@ namespace indexer {
                     string tmpChunkRootsPath = targetDir + "/tmpChunkRoots_" + std::to_string(fcr.taskID) + ".bin";
                     readBinaryFile(tmpChunkRootsPath, fcr.offset, fcr.size, buffer->data);
                     fcr.node->points = buffer;
+                    numPoints += buffer->size / indexer.attributes.bytes;
                 }
 
                 sampler.sample(task.node, chunks->attributes, indexer.spacing, onNodeCompleted, onNodeDiscarded);
 
+                pointsProcessed = pointsProcessed + numPoints;
+
+                if (now() - lastReport > 1.0) {
+                    state.pointsProcessed = pointsProcessed;
+                    state.duration = now() - tStart;
+
+                    lastReport = now();
+                }
                 task.node->children.clear();
             }
 
@@ -2249,7 +2292,11 @@ namespace indexer {
             string tmpChunkRootsPath = targetDir + "/tmpChunkRoots_" + std::to_string(i) + ".bin";
             fs::remove(tmpChunkRootsPath);
         }
+        double duration = now() - tStart;
+        cout << "====================================================" << endl;
+        state.values["duration(final merge)"] = formatNumber(duration, 3);
 
+        cout.flush();
 
     }
 

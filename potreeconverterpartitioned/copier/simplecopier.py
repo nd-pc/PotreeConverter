@@ -1,8 +1,10 @@
 import shutil
 import subprocess
-from copier import Copier
+from .copier import Copier
 
-from ..loggingwrapper import LoggingWrapper
+from potreeconverterpartitioned.loggingwrapper import LoggingWrapper
+
+
 
 class SimpleCopier(Copier):
 

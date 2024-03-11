@@ -8,9 +8,9 @@ from multiprocessing import Process
 
 from potreeconverterpartitioned import PotreeConverterBatched
 
-from loggingwrapper import LoggingWrapper
+from potreeconverterpartitioned.loggingwrapper import LoggingWrapper
 
-from copier import SimpleCopier
+from potreeconverterpartitioned.copier import SimpleCopier
 
 
 def PotreeConverterMPIBatchedCopier(potreeConverterBatched):
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     '''The run script fpr PotreeConverterMPI. It creates the directories, launches the job and monitors it.'''
 
     if len(sys.argv) != 2:
-        LoggingWrapper.error("Usage: python3 run_PotreecConverterBatched.py <path to config.ini file>")
+        LoggingWrapper.error("Usage: python3 run_PotreeConverterBatched.py <path to config.ini file>")
         exit(1)
     configFilePath = sys.argv[1]
     potreeConverterBatched = PotreeConverterBatched(configFilePath)
@@ -50,7 +50,7 @@ if __name__ == "__main__":
         for child in parent.children(recursive=True):
             child.kill()
         PotreeConverterMPICopier.terminate()
-        LoggingWrapper.info("Batch copier terminated")
+        LoggingWrapper.error("Batch copier terminated on PotreeConverterMPI failure/cancel")
         exit(1)
     # If both jobs finished successfully, exit
     elif potreeConverterBatched.scheduler.getJobExitCode() != 0 and PotreeConverterMPICopier.exitcode != 0:
@@ -74,8 +74,8 @@ if __name__ == "__main__":
             LoggingWrapper.error("Batch copier failed. However, PotreeConverterMPI finished successfully")
             exit(1)
 
-    copy_hier_meta = SimpleCopier()
-    copy_hier_meta.copyFiles(potreeConverterBatched.tmpOutputDir + "/hierarchy.bin", potreeConverterBatched.OutputDir)
-    copy_hier_meta.copyFiles(potreeConverterBatched.tmpOutputDir + "/metadata.json", potreeConverterBatched.OutputDir)
+    copyHierMeta = SimpleCopier()
+    copyHierMeta.copyFiles([potreeConverterBatched.tmpOutputDir + "/hierarchy.bin"], potreeConverterBatched.OutputDir)
+    copyHierMeta.copyFiles([potreeConverterBatched.tmpOutputDir + "/metadata.json"], potreeConverterBatched.OutputDir)
     LoggingWrapper.info("Batch copier and PotreeConverterMPI finished successfully", color="green", bold=True)
 

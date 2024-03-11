@@ -293,7 +293,8 @@ struct HierarchyBuilder{
 		fstream fout(hierarchyFilePath, ios::binary | ios::out);
 		int64_t bytesWritten = 0;
 
-
+        // In indexing the MPI proceses write the hierarchy files in separate directories. A hierarchy file contains the information of the nodes in the hierarchy.
+        // Two files with the same name may exist in different directories. The following code creates a map of the file name to the path of the file.
         map<string, vector<string>> hierarchyFiletoPathMap;
         for (int i = 0; i < n_processes; i++) {
             for (auto& entry : fs::directory_iterator(path + "/" + "hierarchyChunks_" + to_string(i))) {
@@ -303,7 +304,7 @@ struct HierarchyBuilder{
                 }
             }
         }
-
+        //----------------------------------------------------------------------------------------------------------------------------------------
 
 		auto batch_root = loadBatch(hierarchyFiletoPathMap["r.bin"]);
 		this->batch_root = batch_root;
@@ -315,6 +316,7 @@ struct HierarchyBuilder{
 			bytesWritten = tmp.size;
 		}
 
+
 		// now write all hierarchy batches, except root
 		// update proxy nodes in root with byteOffsets of written batches.
 		for(auto [filename, paths] : hierarchyFiletoPathMap){
@@ -325,6 +327,7 @@ struct HierarchyBuilder{
 			if(filename == "r.bin") continue;
 			// skip non *.bin files
 			if(!iEndsWith(filename, ".bin")) continue;
+
 
 			auto batch = loadBatch(paths);
 

@@ -356,6 +356,7 @@ void finalMerge(Options& options, string targetDir, State& state, indexer::Index
     }
 }
 
+
 shared_ptr<map<string, vector<string>>> mapChunkstoPaths(string targetDir){
     // Traverse through the "chunk_<process_id>" directories and create a map of chunk file names to the paths of the chunk files.
     shared_ptr<map<string, vector<string>>> chunkFiletoPathMap = make_shared<map<string, vector<string>>>();
@@ -402,7 +403,8 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
     bool isLastbatch = false;
     indexer::Indexer indexer(targetDir);
     indexer.root = make_shared<Node>("r", stats.min, stats.max);
-
+    auto totalDistributionDuration = 0.0;
+    auto totalIndexingDuration = 0.0;
     shared_ptr<indexer::Chunks> chunks = nullptr;
     MPI_Barrier(MPI_COMM_WORLD);
     if(process_id == ROOT)RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
@@ -413,7 +415,6 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
     while (!isLastbatch) {
         bool isLastminiBatchinPartition = false;
 
-        auto distDuration = 0.0;
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total distribution time including copy wait time")
         // Loop until all the mini-batches in a partition are processed.
         while (!isLastminiBatchinPartition){
@@ -460,8 +461,9 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
 
 
             MPI_Barrier(MPI_COMM_WORLD);
-            distDuration += now() - tStartDist;
+            auto distDuration = now() - tStartDist;
 
+            totalDistributionDuration += distDuration;
             if (process_id == ROOT)  RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Distribution time");
             // Write the distribution done signal file. It contains the duration of the distribution.
             if (process_id == ROOT) {
@@ -486,9 +488,12 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
             miniBatchNum++;
 
         }
+        cout.flush();
         MPI_Barrier(MPI_COMM_WORLD);
+        if (process_id == ROOT)
+            cout << "======Distribution for partition no. " << batchNum << " finished======" << endl;
         RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total distribution time including copy wait time")
-        // In distribution, it may be possible that  a chunk file may have been partially wriiten by mutliple processes.
+        // In distribution, it may be possible that  a chunk file may have been partially written by mutliple processes.
         // Som traverse through the "chunk_<process_id>" directories and create a map of chunk file names to the paths of the chunk files.
         // In the indexing phase, the chunk file paths are used to read the chunk files and index them.
         // The files with the same name are treated as a single chunk file.
@@ -510,6 +515,7 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
         chunks = indexing(options, targetDir + "/chunks_" + to_string(process_id), state, indexer, isLastbatch, chunkFiletoPathMap, batchNum);
         MPI_Barrier(MPI_COMM_WORLD);
         indexDuration = now() - tStartIndex;
+        totalIndexingDuration += indexDuration;
         if(process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Indexing time");
 
 
@@ -527,14 +533,23 @@ void process(Options& options, Stats& stats, State& state, string targetDir, Att
                 }
             }
         }
+        cout.flush();
         batchNum++;
         MPI_Barrier(MPI_COMM_WORLD);
+        if (process_id == ROOT)
+            cout << "======Indexing for partition no. " << batchNum << " finished======" << endl;
 
     }
-
-
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (process_id == ROOT) {
+        state.values["duration(distribution)"] = formatNumber(totalDistributionDuration, 3);
+        state.values["duration(indexing)"] = formatNumber(totalIndexingDuration, 3);
+        cout << "======DISTRIUBTION AND INDEXING FINISHED======" << endl;
+    }
     if(process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
 
+
+    cout << "=======================================" << endl;
 
     if(process_id == ROOT) {
         RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Final merge time");
@@ -708,6 +723,9 @@ int main(int argc, char **argv) {
 
     cout << "#threads: " << cpuData.numProcessors << endl;
 
+    // The partitioned implementation requires to store the LAZ headers in seperate JSON files. The headers are stored in the headerDir.
+    // This will allow us to read the headers of all the LAZ files without loading all the LAZ files.
+    // This function reads the headers from JSON files and stores them in a vector of Source objects.
     auto headers = curateHeaders(options.headerDir);
 
     auto outputAttributes = computeOutputAttributes(headers, options.attributes, options.manualBounds);
@@ -741,7 +759,7 @@ int main(int argc, char **argv) {
 
     // auto monitor = startMonitoring(state);
     auto monitor = make_shared<Monitor>(&state);
-    //monitor->start();
+    monitor->start();
 
     // this is the real important stuff
 
@@ -751,7 +769,7 @@ int main(int argc, char **argv) {
     process(options, stats, state, targetDir, outputAttributes, monitor.get());
 
 
-
+    monitor->stop();
 
     if (process_id == ROOT) {
         createReport(options, headers, targetDir, stats, state, tStart);

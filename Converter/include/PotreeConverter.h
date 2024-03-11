@@ -196,7 +196,8 @@ inline vector<Attribute> computeOutputAttributes(Source& header) {
 	return list;
 }
 
-
+//The bounds of the pointcloud to be converted are given in the format: [minx,maxx],[miny,maxy],[minz,maxz] on the command line
+//This function parses the string and returns the min and max values
 inline void parseBoundString(const std::string& boundString, Vector3 &min, Vector3 &max) {
     // Define the regex pattern
     std::regex pattern("\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\]");

@@ -164,7 +164,7 @@ namespace indexer{
 
 			buffer.push_back(hnode);
             //--------MPI--------------------------
-            // We will going to write to hiearchyfile after all the chunks have been processed by a task so that the byTeOffset is correct
+            // We will going to write to hiearchyfile after all the chunks have been processed by a MPI process so that the byteOffset is correct
 			/*if(buffer.size() > 10'000){
 				this->write(buffer, hierarchyStepSize);
 				buffer.clear();
@@ -217,7 +217,6 @@ namespace indexer{
 			// };                              ===
 			//                                  48
 
-			
 			for(auto [key, groupedNodes] : groups){
 
 				Buffer buffer(48 * groupedNodes.size());
@@ -230,12 +229,14 @@ namespace indexer{
 					memset(buffer.data_u8 + 48 * i, ' ', 31);
 					memcpy(buffer.data_u8 + 48 * i, name, node.name.size());
 					buffer.set<uint32_t>(node.numPoints,  48 * i + 31);
+                    //totalOctreefileOffset is added to byteOffset to get the correct offset of anode in the octree.bin file
 					buffer.set<uint64_t>(node.byteOffset + totalOctreefileOffset, 48 * i + 35);
 					buffer.set<uint32_t>(node.byteSize,   48 * i + 43);
 					buffer.set<char    >('\n',             48 * i + 47);
 
 					ss << rightPad(name, 10, ' ') 
 						<< leftPad(to_string(node.numPoints), 8, ' ')
+                        //totalOctreefileOffset is added to byteOffset to get the correct offset of a node in the octree.bin
 						<< leftPad(to_string(node.byteOffset + totalOctreefileOffset), 12, ' ')
 						<< leftPad(to_string(node.byteSize), 12, ' ')
 						<< endl;

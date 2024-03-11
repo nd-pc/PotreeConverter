@@ -4,9 +4,10 @@ from datetime import datetime
 import shutil
 from multiprocessing import Process
 
-from scheduler import Scheduler
+from .scheduler import Scheduler
 
 from ..loggingwrapper import LoggingWrapper
+
 
 
 
@@ -66,8 +67,11 @@ class SbatchScheduler(Scheduler):
                 LoggingWrapper.error("Something went wrong in checking the job status")
                 exit(1)
             output = process.stdout
-
+            if len(output.split()) < 3:
+                LoggingWrapper.error(f"{self.programName} sbatch job not found")
+                exit(1)
             ST = output.split()[2]
+
 
             time.sleep(15)  # Time interval between checks
 
@@ -76,7 +80,7 @@ class SbatchScheduler(Scheduler):
                 self.jobStatus = "FAILED"
                 exit(1)
             elif ST.startswith("CANCELLED"):
-                LoggingWrapper.info(f"{self.programName} sbatch job cancelled", color="red")  # Show humans some info if the job is cancelled
+                LoggingWrapper.error(f"{self.programName} sbatch job cancelled by the user")  # Show humans some info if the job is cancelled
                 self.jobStatus = "KILLED"
                 exit(1)
             elif ST.startswith("TIMEOUT"):

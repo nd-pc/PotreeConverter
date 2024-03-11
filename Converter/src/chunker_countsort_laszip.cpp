@@ -49,6 +49,8 @@ namespace chunker_countsort_laszip {
 
 	mutex mtx_attributes;
 
+    mutex mtx_state;
+
 	struct Point {
 		double x;
 		double y;
@@ -119,7 +121,7 @@ namespace chunker_countsort_laszip {
 		return double(value);
 	}
 
-
+    // This function is claled from both cpunting and distribution. In counting state, it computes the min/max of the attributes and in distribution state, it writes the attributes to the chunk file.
     vector<function<void(int64_t)>> createAttributeHandlers(laszip_header* header, uint8_t* data, laszip_point* point, Attributes& inputAttributes, Attributes& outputAttributes, State &state) {
 
         vector<function<void(int64_t)>> handlers;
@@ -550,10 +552,11 @@ namespace chunker_countsort_laszip {
 		cout << "=======================================" << endl;
 		cout << "=== COUNTING                           " << endl;
 		cout << "=======================================" << endl;
-        cout << "Total LAZ files: " << sources.size() << endl;
 		auto tStart = now();
 		//Vector3 size = max - min;
-
+        state.pointsProcessed = 0;
+        state.bytesProcessed = 0;
+        state.duration = 0;
 
 
 		struct Task{
@@ -747,12 +750,11 @@ namespace chunker_countsort_laszip {
                 }
             }
 
-			static int64_t pointsProcessed = 0;
-			pointsProcessed += task->numPoints;
-
-			state.name = "COUNTING";
-			state.pointsProcessed = pointsProcessed;
-			state.duration = now() - tStart;
+            {
+                lock_guard<mutex> lock(mtx_state);
+                state.pointsProcessed += task->numPoints;
+                state.duration = now() - tStart;
+            }
 
 
 		};
@@ -852,15 +854,6 @@ namespace chunker_countsort_laszip {
 
 
 
-		double duration = now() - tStart;
-
-		cout << "finished counting in " << formatNumber(duration) << "s" << endl;
-		cout << "=======================================" << endl;
-
-		{
-			double duration = now() - tStart;
-			state.values["duration(chunking-count)"] = formatNumber(duration, 3);
-		}
 
 
 		return;
@@ -1125,10 +1118,12 @@ namespace chunker_countsort_laszip {
                     }
                 }
 			}
-
-			state.pointsProcessed += batchSize;
-			state.bytesProcessed += numBytes;
-			state.duration = now() - tStart;
+            {
+                lock_guard<mutex> lock(mtx_state);
+                state.pointsProcessed += batchSize;
+                state.bytesProcessed += numBytes;
+                state.duration = now() - tStart;
+            }
 
 			auto tAddBuckets = now();
 			addBuckets(chunksDir, buckets);
@@ -1209,9 +1204,9 @@ namespace chunker_countsort_laszip {
 
 		delete writer;
 
-		auto duration = now() - tStart;
-		cout << "finished creating chunks in " << formatNumber(duration) << "s" << endl;
-		cout << "=======================================" << endl;
+
+
+
 	}
 
 	void writeMetadata(string path, Vector3 min, Vector3 max, Attributes& attributes) {
@@ -1482,7 +1477,7 @@ namespace chunker_countsort_laszip {
 
         vector<std::atomic_int32_t> grid(gridSize * gridSize * gridSize);
         state.currentPass = 1;
-
+        auto totalCountingTime= 0.0;
         int batchNum = 0;
         bool isLastBatch = false;
         if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in counting including waiting for copying");
@@ -1533,6 +1528,7 @@ namespace chunker_countsort_laszip {
                                outputAttributes, monitor);
             MPI_Barrier(MPI_COMM_WORLD);
             auto duration = now() - tStart;
+            totalCountingTime += duration;
             if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total counting time");
             // write the time taken to count the batch to a file. This file acts as a signal for partition loader /unloader script
             if (process_id == ROOT) {
@@ -1550,10 +1546,17 @@ namespace chunker_countsort_laszip {
                 }
             }
             batchNum++;
+            cout.flush();
             MPI_Barrier(MPI_COMM_WORLD);
+            if (process_id == ROOT)
+                cout << "=========Counting for batch no " << batchNum << " finished====================" << endl;
         }
+
         MPI_Barrier(MPI_COMM_WORLD);
-        cout << "Done counting" << endl;
+        if (process_id == ROOT) {
+            state.values["duration(counting)"] = formatNumber(totalCountingTime, 3);
+            cout << "========================COUNTING FINISHED================================" << endl;
+        }
         if (process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu,  "Total time spent in counting including waiting for copying");
         cout << "Summing up counting grids of all MPI processes..." << endl;
         if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total time spent in summing up the counting grids of all MPI processes");

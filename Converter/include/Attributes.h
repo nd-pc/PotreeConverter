@@ -106,6 +106,9 @@ inline AttributeType typenameToType(string name) {
 	}
 }
 
+// See asprs.org/a/society/committees/standards/asprs_las_formathttps://www.asprs.org/a/society/committees/standards/asprs_las_format_v12.pdf_v12.pdf
+// for more information about the attribute types
+
 struct Attribute {
 	string name = "";
 	string description = "";

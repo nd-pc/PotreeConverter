@@ -1,21 +1,17 @@
-import ast
+
 import configparser
 import glob
-import sys
 import heapq
-from datetime import datetime
 from pathlib import Path
 import time
 import csv
-import psutil
 import shutil
-from scheduler import SbatchScheduler
-from scheduler import LocalScheduler
-from scheduler import QsubScheduler
-from copier import ParallelCopier
+from .scheduler import SbatchScheduler
+from .scheduler import LocalScheduler
+from .scheduler import QsubScheduler
+from .copier import ParallelCopier
 
-from loggingwrapper import LoggingWrapper
-
+from .loggingwrapper import LoggingWrapper
 
 
 
@@ -41,6 +37,7 @@ class PotreeConverterBatched:
         self.copierType = ""
         self.countingBatchCopier = None
         self.distributionBatchCopier = None
+        self.indexingBatchCopier = None
         self.miscCopier = None
         self.batchesDone = {"counting": [], "indexing": [], "distribution": []}
         self.numFilesDone = {"counting": 0, "indexing": 0, "distribution": 0}
@@ -88,8 +85,6 @@ class PotreeConverterBatched:
             else:
                 self.partitionsCSV = config["PARTITIONS"]["CSV"]
 
-            self.countingBatchSize = eval(config["PARTITIONS"]["CountingBatchSize"])
-
         if "TMP_STORAGE" not in sections:
             LoggingWrapper.error("TMP_STORAGE section not found in config file")
             exit(1)
@@ -103,13 +98,13 @@ class PotreeConverterBatched:
                     self.tmpInputDir = self.InputDir
                     self.inputToTmpInputSizeRatio = 0
                 else:
-                    self.tmpInputDir = self.tmpDir + "/PotreeConverter_Input"
+                    self.tmpInputDir = self.tmpDir + "/PotreeConverterMPI_Input"
                     self.inputToTmpInputSizeRatio = 1
                 if config["INPUT_OUTPUT"]["OutputDirType"] == "local":
                     self.tmpOutputDir = self.OutputDir
                     self.inputToOutputSizeRatio = 0
                 else:
-                    self.tmpOutputDir = self.tmpDir + "/PotreeConverter_Output"
+                    self.tmpOutputDir = self.tmpDir + "/PotreeConverterMPI_Output"
                     self.inputToOutputSizeRatio = 2
                 self.lazHeadersDir = self.tmpDir + "/" + Path(self.InputDir).name + "_headers"
             if "MaxTmpSpaceAvailable" not in config["TMP_STORAGE"]:
@@ -141,6 +136,7 @@ class PotreeConverterBatched:
         if "COPIER" not in sections:
             LoggingWrapper.error("COPIER section not found in config file")
             exit(1)
+
         else:
             if "Type" not in config["COPIER"]:
                 LoggingWrapper.error("Type not found in COPIER section")
@@ -149,12 +145,14 @@ class PotreeConverterBatched:
                 self.copierType = config["COPIER"]["Type"]
         if self.copierType == "cp":
             self.countingBatchCopier = ParallelCopier()
+            self.distributionBatchCopier = ParallelCopier()
             self.indexingBatchCopier = ParallelCopier()
             self.miscCopier = ParallelCopier()
         else:
             LoggingWrapper.error("Copier type not recognized. Must be only local")
             exit(1)
 
+        self.createPartitions()
         self.createDirectories()
 
         if "PROGRAM" not in sections:
@@ -176,12 +174,12 @@ class PotreeConverterBatched:
                 LoggingWrapper.error("Parameters not found in SCHEDULER section")
                 exit(1)
             if "Type" in config["SCHEDULER"]:
-                if config["SCHEDULER"]["Type"] == "sbatch":
+                if config["SCHEDULER"]["Type"] == "slurm":
                     parameters = config["SCHEDULER"]["Parameters"]
                     with open(self.tmpDir + "/sbatchScript.sh", "w") as sbatchScript:
                         sbatchScript.write("#!/bin/sh\n\n")
                         sbatchScript.write("#SBATCH " + parameters + "\n\n")
-                        sbatchScript.write(self.programPath +  " " + self.programOptions + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir)
+                        sbatchScript.write(shutil.which("mpiexec") + " " + self.programPath +  " " + self.programOptions + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir)
                     programCommand = shutil.which("sbatch") + " " + self.tmpDir + "/sbatchScript.sh"
                     self.scheduler = SbatchScheduler(programCommand, self.programName)
                 elif config["SCHEDULER"]["Type"] == "pbs":
@@ -189,7 +187,7 @@ class PotreeConverterBatched:
                     with open(self.tmpDir + "/qsubScript.sh", "w") as qsubScript:
                         qsubScript.write("#!/bin/sh\n\n")
                         qsubScript.write("#PBS " + parameters + "\n\n")
-                        qsubScript.write(self.programPath + " " + self.programOptions + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir)
+                        qsubScript.write(shutil.which("mpiexec") + " " +self.programPath + " " + self.programOptions + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir)
                     programCommand = shutil.which("qsub") + " " + self.tmpDir + "/qsubScript.sh"
                     self.scheduler = QsubScheduler(programCommand, self.programName)
                 elif config["SCHEDULER"]["Type"] == "local":
@@ -325,7 +323,7 @@ class PotreeConverterBatched:
             self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
     def counting(self):
         ''' The function to load/unload a batch of LAZ files for the counting phase of the PotreeConverterMPI program'''
-
+        LoggingWrapper.info("==================================================")
         LoggingWrapper.info("Batch copier for counting started", color="blue", bold=True)
         for partition in self.lazPartitions:
             if partition["status"] == "skip":
@@ -353,14 +351,13 @@ class PotreeConverterBatched:
             self.testBatchDone(self.countingBatchCopier, self.tmpOutputDir + "/counting_done_signals", "counting")
             time.sleep(60)
 
-        LoggingWrapper.info("Counting finished. Total " + str(
-            self.numFilesDone["counting"]) + " files counted in " + str(
-            len(self.batchesDone["counting"])) + " batches.", color="green", bold=True)
-        self.lazFilestoProcess.clear()
+        LoggingWrapper.info("Counting finished", color="green", bold=True)
+        LoggingWrapper.info("==================================================")
 
     def indexing(self):
         '''The function to load/unload a batch of LAZ files for the distribution and indexing phase of the PotreeConverterMPI program'''
-        LoggingWrapper.info("Batch copier for indexing started", color="blue", bold=True)
+        LoggingWrapper.info("==================================================")
+        LoggingWrapper.info("Batch copier for distribution and indexing started", color="blue", bold=True)
         self.lazFilestoProcess = self.lazPartitions.copy()
         self.lazFilestoProcess.sort(key=lambda x: x["size"])
         skipPartitions = []
@@ -401,10 +398,8 @@ class PotreeConverterBatched:
             if not self.indexingBatchCopier.isbatchDictEmpty():
                 self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
             time.sleep(60)
-        LoggingWrapper.info("Indexing finished. Total " + str(
-            self.numFilesDone["indexing"]) + " files indexed in " + str(
-            len(self.batchesDone["indexing"])) + " partitions. Total " + str(totalBatches) + " partitions, " + str(
-            len(skipPartitions)) +  " skipped" , color="green", bold=True)
+        LoggingWrapper.info("Indexing finished", color="green", bold=True)
+        LoggingWrapper.info("==================================================")
 
 
     def parseBladnr(self, bladnr):

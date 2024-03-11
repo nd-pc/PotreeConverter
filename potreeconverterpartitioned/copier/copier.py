@@ -3,7 +3,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from ..loggingwrapper import LoggingWrapper
+from potreeconverterpartitioned.loggingwrapper import LoggingWrapper
 
 class Copier:
 

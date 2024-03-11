@@ -89,8 +89,9 @@ fabric.properties
 outputs/
 rsync_PotreeConverterMPI.sh
 watchers.xml
-PotreeConverterPartitioned/partitions/ahn3_C69_partitions_1x1.csv
-PotreeConverterPartitioned/partitions/ahn3_partitions_1x1.csv
-PotreeConverterPartitioned/partitions/ahn3_partitions_4x4_part_7.csv
-PotreeConverterPartitioned/partitions/file_partition.csv
-PotreeConverterPartitioned/partitions/ahn3_partitions_4x4.csv
+potreeconverterpartitioned/partitions/ahn3_C69_partitions_1x1.csv
+potreeconverterpartitioned/partitions/ahn3_partitions_1x1.csv
+potreeconverterpartitioned/partitions/ahn3_partitions_4x4_part_7.csv
+potreeconverterpartitioned/partitions/file_partition.csv
+potreeconverterpartitioned/partitions/ahn3_partitions_4x4.csv
+

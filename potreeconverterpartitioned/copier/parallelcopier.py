@@ -2,24 +2,24 @@ import itertools
 import multiprocessing
 import shutil
 import subprocess
-from copier import Copier
+from .copier import Copier
 
-from ..loggingwrapper import LoggingWrapper
+from potreeconverterpartitioned.loggingwrapper import LoggingWrapper
 
 
 class ParallelCopier(Copier):
-    '''Copies files in parallel command'''
-    def fileChunks(self, filesList, nChunks):
-        '''Splits the files into chunks of size nChunks
+    '''Copies files in parallel by splitting the files  and copying in parallel'''
+    def splitFiles(self, filesList, nSplits):
+        '''Splits the files into nSplits
         :param filesList: the list of files to split
         :param nChunks: the number of chunks to split the files into'''
-        chunkSize = len(filesList) // nChunks
-        remainder = len(filesList) % nChunks
+        splitSize = len(filesList) // nSplits
+        remainder = len(filesList) % nSplits
         currentIndex = 0
-        for i in range(nChunks):
+        for i in range(nSplits):
             additional = 1 if i < remainder else 0
-            yield filesList[currentIndex:currentIndex + chunkSize + additional]
-            currentIndex += chunkSize + additional
+            yield filesList[currentIndex:currentIndex + splitSize + additional]
+            currentIndex += splitSize + additional
 
 
     def copyFiles(self, filesToCopy, destination):
@@ -29,9 +29,9 @@ class ParallelCopier(Copier):
         subsets = self.filesSubsets(filesToCopy)
         for subset in subsets:
             numProcesses = multiprocessing.cpu_count() if len(subset) >= multiprocessing.cpu_count() else len(subset)
-            chunks = list(self.fileChunks(subset, numProcesses))
+            numSplits = list(self.splitFiles(subset, numProcesses))
             with multiprocessing.Pool(numProcesses) as pool:
-                pool.starmap(self.runCopyCmd, list(zip(chunks, itertools.repeat(destination))))
+                pool.starmap(self.runCopyCmd, list(zip(numSplits, itertools.repeat(destination))))
 
     def runCopyCmd(self, files, destination):
         '''Runs the copy command

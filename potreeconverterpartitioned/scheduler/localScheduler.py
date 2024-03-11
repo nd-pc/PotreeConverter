@@ -1,10 +1,9 @@
 import subprocess
 from multiprocessing import Process
 import psutil
-from scheduler import Scheduler
+from .scheduler import Scheduler
 
-from ..loggingwrapper import LoggingWrapper
-
+from potreeconverterpartitioned.loggingwrapper import LoggingWrapper
 
 
 

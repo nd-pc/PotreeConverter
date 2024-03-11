@@ -3,9 +3,10 @@ import time
 from datetime import datetime
 import shutil
 from multiprocessing import Process
-from scheduler import Scheduler
+from .scheduler import Scheduler
 
-from ..loggingwrapper import LoggingWrapper
+from potreeconverterpartitioned.loggingwrapper import LoggingWrapper
+
 
 class QsubScheduler(Scheduler):
     """Class for PBS job scheduler"""
@@ -56,7 +57,7 @@ class QsubScheduler(Scheduler):
             ST = job_info[2].split()[4]
 
             if ST.startswith("C"):
-                LoggingWrapper.info(f"{self.programName} qsub job cancelled", color="red")  # Show humans some info if the job is cancelled
+                LoggingWrapper.error(f"{self.programName} qsub job cancelled by the user")  # Show humans some info if the job is cancelled
                 self.jobStatus = "KILLED"
                 exit(1)
             time.sleep(15)
@@ -84,7 +85,7 @@ class QsubScheduler(Scheduler):
                 self.jobStatus = "FAILED"
                 exit(1)
             elif ST.startswith("C"):
-                LoggingWrapper.info(f"{self.programName} qsub job cancelled", color="red")  # Show humans some info if the job is cancelled
+                LoggingWrapper.error(f"{self.programName} qsub job cancelled by the user")  # Show humans some info if the job is cancelled
                 self.jobStatus = "KILLED"
                 exit(1)
             elif ST.startswith("T"):
