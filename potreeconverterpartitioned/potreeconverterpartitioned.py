@@ -1,24 +1,24 @@
 
 import configparser
+import csv
 import glob
 import heapq
-from pathlib import Path
-import time
-import csv
 import shutil
+import time
+
+from pathlib import Path
+
+from .copier import ParallelCopier
+from .loggingwrapper import LoggingWrapper
 from .scheduler import SbatchScheduler
 from .scheduler import LocalScheduler
 from .scheduler import QsubScheduler
-from .copier import ParallelCopier
-
-from .loggingwrapper import LoggingWrapper
-
 
 
 class PotreeConverterBatched:
-    ''' The class is a driver for the PotreeConverterMPI program. It starts the PotreeConverterMPI program and load/unload the partitions '''
+    ''' A driver for the PotreeConverterMPI program. This starts the PotreeConverterMPI program and loads/unloads the partitions. '''
     def __init__(self, configFile):
-        ''' The constructor reads the config file and initializes the class variables. It also starts the PotreeConverterMPI program '''
+        ''' Reads the config file and initializes the class variables. Also starts the PotreeConverterMPI program. '''
         #class variables
         self.maxTmpSpaceAvailable = 0
         self.countingBatchSize = 0
@@ -47,10 +47,13 @@ class PotreeConverterBatched:
         self.programName = ""
         self.partitionsToProcess = None
         self.lazPartitions = []
-
+        
+        # Parse the configuration file.
         config = configparser.ConfigParser()
         config.read(configFile)
         sections = config.sections()
+
+        # Input and output parameters.
         if "INPUT_OUTPUT" not in sections:
             LoggingWrapper.error("INPUT_OUTPUT section not found in config file")
             exit(1)
@@ -60,9 +63,11 @@ class PotreeConverterBatched:
                 exit(1)
             else:
                 self.InputDir = config["INPUT_OUTPUT"]["InputDir"]
+            
             if "InputDirType" not in config["INPUT_OUTPUT"]:
                 LoggingWrapper.error("InputDirType not found in INPUT_OUTPUT section")
                 exit(1)
+            
             if "OutputDir" not in config["INPUT_OUTPUT"]:
                 LoggingWrapper.error("OutputDir not found in INPUT_OUTPUT section")
                 exit(1)
@@ -75,6 +80,8 @@ class PotreeConverterBatched:
                 exit(1)
             else:
                 self.lazHeadersToCopy = config["INPUT_OUTPUT"]["LazHeadersDir"]
+        
+        # Partition parameters.
         if "PARTITIONS" not in sections:
             LoggingWrapper.error("PARTITIONS section not found in config file")
             exit(1)
@@ -85,6 +92,7 @@ class PotreeConverterBatched:
             else:
                 self.partitionsCSV = config["PARTITIONS"]["CSV"]
 
+        # Temporary storage parameters.
         if "TMP_STORAGE" not in sections:
             LoggingWrapper.error("TMP_STORAGE section not found in config file")
             exit(1)
@@ -100,12 +108,14 @@ class PotreeConverterBatched:
                 else:
                     self.tmpInputDir = self.tmpDir + "/PotreeConverterMPI_Input"
                     self.inputToTmpInputSizeRatio = 1
+                
                 if config["INPUT_OUTPUT"]["OutputDirType"] == "local":
                     self.tmpOutputDir = self.OutputDir
                     self.inputToOutputSizeRatio = 0
                 else:
                     self.tmpOutputDir = self.tmpDir + "/PotreeConverterMPI_Output"
                     self.inputToOutputSizeRatio = 2
+                
                 self.lazHeadersDir = self.tmpDir + "/" + Path(self.InputDir).name + "_headers"
             if "MaxTmpSpaceAvailable" not in config["TMP_STORAGE"]:
                 LoggingWrapper.error(
@@ -113,18 +123,21 @@ class PotreeConverterBatched:
                 exit(1)
             else:
                 self.maxTmpSpaceAvailable = eval(config["TMP_STORAGE"]["MaxTmpSpaceAvailable"])
+            
             if "LazCompressionRatio" not in config["TMP_STORAGE"]:
                 LoggingWrapper.error(
                     "LazCompressionRatio not found in TMP_STORAGE section")
                 exit(1)
             else:
                 self.lazCompressionRatio = eval(config["TMP_STORAGE"]["LazCompressionRatio"])
+            
             if "DistributionBatchSize" not in config["TMP_STORAGE"]:
                 LoggingWrapper.error(
                     "DistributionBatchSize not found in TMP_STORAGE section")
                 exit(1)
             else:
                 self.distributionBatchSize = eval(config["TMP_STORAGE"]["DistributionBatchSize"])
+            
             if "CountingBatchSize" not in config["TMP_STORAGE"]:
                 LoggingWrapper.error(
                     "CountingBatchSize not found in TMP_STORAGE section")
@@ -132,7 +145,7 @@ class PotreeConverterBatched:
             else:
                 self.countingBatchSize = eval(config["TMP_STORAGE"]["CountingBatchSize"])
 
-
+        # Copier parameters.
         if "COPIER" not in sections:
             LoggingWrapper.error("COPIER section not found in config file")
             exit(1)
@@ -152,9 +165,11 @@ class PotreeConverterBatched:
             LoggingWrapper.error("Copier type not recognized. Must be only local")
             exit(1)
 
+        # Create the partitions and required directories.
         self.createPartitions()
         self.createDirectories()
 
+        # Executable parameters.
         if "PROGRAM" not in sections:
             LoggingWrapper.error("PROGRAM section not found in config file")
             exit(1)
@@ -165,16 +180,18 @@ class PotreeConverterBatched:
             else:
                 self.programPath = config["PROGRAM"]["Path"]
                 self.programName = config["PROGRAM"]["Path"].split("/")[-1]
+            
             if "Options" in config["PROGRAM"]:
                 self.programOptions = config["PROGRAM"]["Options"]
 
-
+        # Scheduler parameters.
         if "SCHEDULER" in sections:
             if "Parameters" not in config["SCHEDULER"]:
                 LoggingWrapper.error("Parameters not found in SCHEDULER section")
                 exit(1)
             if "Type" in config["SCHEDULER"]:
                 if config["SCHEDULER"]["Type"] == "slurm":
+                    # SLURM batch script.
                     parameters = config["SCHEDULER"]["Parameters"]
                     with open(self.tmpDir + "/sbatchScript.sh", "w") as sbatchScript:
                         sbatchScript.write("#!/bin/sh\n\n")
@@ -183,6 +200,7 @@ class PotreeConverterBatched:
                     programCommand = shutil.which("sbatch") + " " + self.tmpDir + "/sbatchScript.sh"
                     self.scheduler = SbatchScheduler(programCommand, self.programName)
                 elif config["SCHEDULER"]["Type"] == "pbs":
+                    # PBS script.
                     parameters = config["SCHEDULER"]["Parameters"]
                     with open(self.tmpDir + "/qsubScript.sh", "w") as qsubScript:
                         qsubScript.write("#!/bin/sh\n\n")
@@ -191,6 +209,7 @@ class PotreeConverterBatched:
                     programCommand = shutil.which("qsub") + " " + self.tmpDir + "/qsubScript.sh"
                     self.scheduler = QsubScheduler(programCommand, self.programName)
                 elif config["SCHEDULER"]["Type"] == "local":
+                    # Local execution.
                     programCommand = self.programPath + " " + self.programOptions + " -o " + self.tmpOutputDir + " --header-dir " + self.lazHeadersDir
                     self.scheduler = LocalScheduler(programCommand, self.programName)
                 else:
@@ -205,7 +224,7 @@ class PotreeConverterBatched:
 
 
     def bordered(self, text):
-        ''' This function is used to print a bordered text '''
+        ''' Prints bordered text. '''
         lines = text.split("\n")
         width = max(len(s) for s in lines)
         res = ['=' * width]
@@ -215,10 +234,17 @@ class PotreeConverterBatched:
         return '\n'.join(res)
 
     def catFiles(self, filesToCat, destinationFile, batchCopier):
-        ''' This function is used to concatenate the output files of the PotreeConverterMPI program after processing a partition
-        :param filesToCat: The list of files to concatenate
-        :param destinationFile: The destination file
-        :param batchCopier: The copier object
+        '''
+        Concatenates the output files of the PotreeConverterMPI program after processing a partition.
+        
+        Parameters
+        ----------
+        filesToCat : str
+            The list of files to concatenate
+        destinationFile : str
+            The destination file
+        batchCopier : obj
+            The copier object
         '''
 
         batchCopier.concatFiles(filesToCat, destinationFile)
@@ -226,23 +252,35 @@ class PotreeConverterBatched:
 
 
     def testBatchDone(self, batchCopier, signalDir, state):
-        ''' This function is used to test if a batch/partition is done processing. If a batch is done processing, it will be removed from the batch dictionary and the corresponding signal files will be removed
-        :param batchCopier: The copier object
-        :param signalDir: The directory where to read the signal files from the PotreeConverterMPI program
-        :param state: The state of the processing (counting, indexing or distribution)
+        '''
+        Tests if a batch/partition is done processing.
+
+        If a batch is done processing, it will be removed from the batch dictionary and the corresponding signal files will be removed.
+        
+        Parameters
+        ----------
+        batchCopier : obj
+            The copier object
+        signalDir : str
+            The directory where to read the signal files from the PotreeConverterMPI program
+        state : str
+            The state of the processing (counting, indexing or distribution)
         '''
         if state == "indexing" or state == "distribution":
             partitionorbatch = "Partition"
         else:
             partitionorbatch = "Batch"
         doneBatchNums = []
+
         if glob.glob(signalDir + "/batchno_*_" + state + "_done") != []:
             doneBatchNums = sorted(map(lambda x: int(Path(x).stem.split("_")[1]), glob.glob(signalDir + "/batchno_*_" + state + "_time_written")))
+        
         for batchNum in doneBatchNums:
             signalFile = open(signalDir + "/batchno_" + str(batchNum) + "_" + state + "_done", "r")
             durationStr = signalFile.readline().rstrip("\n")
             duration = float(durationStr)
             signalFile.close()
+            
             if (durationStr != "-1.0"):
                 LoggingWrapper.info(partitionorbatch + "-" + str(
                 batchCopier.getPartitionNum(batchNum)) + " done " + state + " in " + str(
@@ -251,11 +289,13 @@ class PotreeConverterBatched:
                 self.batchesDone[state].append(str(batchNum) + "(in partition-" + str(batchCopier.getPartitionNum(batchNum)) + ")")
             else:
                 self.batchesDone[state].append(str(batchCopier.getPartitionNum(batchNum)))
+            
             self.numFilesDone[state] += len(batchCopier.getFiles(batchNum))
             batchCopier.removeBatch(batchNum)
             batchCopier.setTotalSize(max(0, batchCopier.gettotalSize()))
             Path(signalDir + "/batchno_" + str(batchNum) + "_" + state + "_done").unlink()
             Path(signalDir + "/batchno_" + str(batchNum) + "_" + state + "_time_written").unlink()
+
             if state == "indexing":
                 filesToCat = []
                 for octree in glob.glob(self.tmpOutputDir + "/octree_" + str(batchNum) + "_*.bin"):
@@ -264,47 +304,74 @@ class PotreeConverterBatched:
                 self.catFiles(filesToCat, self.OutputDir + "/octree.bin", batchCopier)
                 open(self.tmpOutputDir + "/indexing_copy_done_signals/batchno_" + str(batchNum) + "_concatenated",
                      "w").close()
+            
         if not batchCopier.isbatchDictEmpty():
             pending = ",".join(map(lambda x: str(batchCopier.getPartitionNum(x)), batchCopier.getCopiedBatchNums()))
             done = ",".join(self.batchesDone[state])
             if state == "distribution":
                 pending = ",".join(map(lambda x: str(x) + "(in partition-" + str(batchCopier.getPartitionNum(x)) + ")", batchCopier.getCopiedBatchNums()))
+            
             LoggingWrapper.info(state.capitalize() +  " pending for " + partitionorbatch.lower() + "s: " + pending + ". Done " + partitionorbatch.lower() + "s: " + done)
+
+    
     def copyBatch(self, filesToCopy, size, destination, batchCopier, signalDir, state, partition=""):
-        ''' This function is used to copy a batch/partition to the temporary input directory.
-        :param filesToCopy: The list of files to copy
-        :param size: The total size of the files to copy
-        :param destination: The destination directory
-        :param batchCopier: The copier object
-        :param signalDir: The directory where to write signal files for the PotreeConverterMPI program
-        :param state: The state of the batch/partition
-        :param partition: The partition number
+        '''
+        Copies a batch/partition to the temporary input directory.
+
+        Parameters
+        ----------
+        filesToCopy : str
+            The list of files to copy
+        size : int
+            The total size of the files to copy
+        destination : str
+            The destination directory
+        batchCopier : obj
+            The copier object
+        signalDir : str
+            The directory where to write signal files for the PotreeConverterMPI program
+        state : str
+            The state of the batch/partition
+        partition : str
+            The partition number
         '''
 
         if self.tmpInputDir != self.InputDir:
             batchCopier.copyBatch(filesToCopy, size, destination, partition)
         else:
             batchCopier.copyBatch([], 0, destination, partition)
+        
         if state != "indexing":
             with open(signalDir + "/" + "batchno_" + str(batchCopier.getNumBatchesCopied() - 1) + "_copied",
                       "w") as signalToPotreeConverterMPI:  # signal to potree converter
                 signalToPotreeConverterMPI.write(",".join(list(map(lambda x: str(destination + "/" + Path(x).name), filesToCopy))))  # write the copied files to the signal file
+            
                 if (state == "distribution"):
                     if self.lazDistributionBatch == []:
                         signalToPotreeConverterMPI.write("\nlastminibatchinpartition")
                     else:
                         signalToPotreeConverterMPI.write("\nnotlastminibatchinpartition")
+                    
                 if (self.lazFilestoProcess == []):
                     signalToPotreeConverterMPI.write("\nlastbatch")
                 else:
                     signalToPotreeConverterMPI.write("\nnotlastbatch")
+                
             open(signalDir + "/" + "batchno_" + str(batchCopier.getNumBatchesCopied() - 1) + "_written", "w").close()
 
+
     def distribution(self, lazPartition, partitionId):
-        ''' Thev function to load/unload partitions for the distribution phase of the PotreeConverterMPI program
-        :param lazPartition
-        :param partition number
         '''
+        Loads/unloads partitions for the distribution phase of the PotreeConverterMPI program.
+
+        Parameters
+        ----------
+        lazPartition : str
+            LAZ partition files
+        partitionId : str
+            partition number
+        '''
+
         self.lazDistributionBatch = lazPartition.copy()
         while self.lazDistributionBatch:  # loop until all files are copied
             size = 0
@@ -321,16 +388,21 @@ class PotreeConverterBatched:
             self.copyBatch(filesToCopy, size, self.tmpInputDir, self.distributionBatchCopier, self.tmpOutputDir + "/distribution_copy_done_signals", "distribution", partitionId)
             self.testBatchDone(self.distributionBatchCopier, self.tmpOutputDir + "/distribution_done_signals", "distribution")
             self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
+    
+    
     def counting(self):
-        ''' The function to load/unload a batch of LAZ files for the counting phase of the PotreeConverterMPI program'''
+        ''' Loads/unloads a batch of LAZ files for the counting phase. '''
+
         LoggingWrapper.info("==================================================")
         LoggingWrapper.info("Batch copier for counting started", color="blue", bold=True)
+
         for partition in self.lazPartitions:
             if partition["status"] == "skip":
                 continue
             self.lazFilestoProcess.extend(partition["files"])
 
-        while self.lazFilestoProcess:  # loop until all files are copied
+        # Copy all files and test whether the batch is done.
+        while self.lazFilestoProcess:
             if self.countingBatchCopier.gettotalSize() < self.maxTmpSpaceAvailable:
                 size = 0
                 filesToCopy = []
@@ -347,6 +419,7 @@ class PotreeConverterBatched:
                 self.copyBatch(filesToCopy, size, self.tmpInputDir, self.countingBatchCopier, self.tmpOutputDir + "/counting_copy_done_signals", "counting")
             self.testBatchDone(self.countingBatchCopier, self.tmpOutputDir + "/counting_done_signals", "counting")
 
+        # Wait until all batches are done.
         while not self.countingBatchCopier.isbatchDictEmpty():
             self.testBatchDone(self.countingBatchCopier, self.tmpOutputDir + "/counting_done_signals", "counting")
             time.sleep(60)
@@ -354,15 +427,19 @@ class PotreeConverterBatched:
         LoggingWrapper.info("Counting finished", color="green", bold=True)
         LoggingWrapper.info("==================================================")
 
+
     def indexing(self):
-        '''The function to load/unload a batch of LAZ files for the distribution and indexing phase of the PotreeConverterMPI program'''
+        ''' Loads/unloads a batch of LAZ files for the distribution and indexing phase. '''
+        
         LoggingWrapper.info("==================================================")
         LoggingWrapper.info("Batch copier for distribution and indexing started", color="blue", bold=True)
         self.lazFilestoProcess = self.lazPartitions.copy()
         self.lazFilestoProcess.sort(key=lambda x: x["size"])
         skipPartitions = []
         totalBatches = len(self.lazFilestoProcess)
-        while self.lazFilestoProcess:  # loop until all files are copied
+
+        # Copy all files and test whether the batch is done.
+        while self.lazFilestoProcess:
             currbatches = self.lazFilestoProcess.copy()
             for lazBatch in currbatches:
                 if lazBatch["status"] == "skip":
@@ -370,6 +447,7 @@ class PotreeConverterBatched:
                     self.lazFilestoProcess.remove(lazBatch)
                     LoggingWrapper.warning("Skipping partition " + str(lazBatch["id"]))
                     continue
+            
                 copiedBatchNums = self.indexingBatchCopier.getCopiedBatchNums()
                 if not copiedBatchNums: # if no batch is waiting to be processed
                     spaceUtilization = lazBatch["size"] * (self.lazCompressionRatio + self.inputToOutputSizeRatio + self.inputToTmpInputSizeRatio)
@@ -389,47 +467,72 @@ class PotreeConverterBatched:
                     self.distribution(batchToCopy["files"], batchToCopy["id"])
                     self.copyBatch([], batchToCopy["size"], self.tmpInputDir, self.indexingBatchCopier,
                                    self.tmpOutputDir + "", "indexing", batchToCopy["id"])
+                
                 self.testBatchDone(self.distributionBatchCopier, self.tmpOutputDir + "/distribution_done_signals", "distribution")
                 self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
 
+        # Wait until all batches are done.
         while (not self.indexingBatchCopier.isbatchDictEmpty()) or (not self.distributionBatchCopier.isbatchDictEmpty()):
             if not self.distributionBatchCopier.isbatchDictEmpty():
                 self.testBatchDone(self.distributionBatchCopier, self.tmpOutputDir + "/distribution_done_signals", "distribution")
             if not self.indexingBatchCopier.isbatchDictEmpty():
                 self.testBatchDone(self.indexingBatchCopier, self.tmpOutputDir + "/indexing_done_signals", "indexing")
             time.sleep(60)
+        
         LoggingWrapper.info("Indexing finished", color="green", bold=True)
         LoggingWrapper.info("==================================================")
 
 
     def parseBladnr(self, bladnr):
-       ''' This function is used to parse the bladnr from the partitions CSV file. The following function is used to parse the bladnr for two possible formats of the bladnr:
-       1. 1234
-       2. /path/to/C_1234.LAZ
-       Modify the following function if the bladnr format is different
-       :param bladnr: The bladnr to parse
-       :return: The path to the bladnr file in the input directory
-       '''
-       if bladnr.upper().endswith(".LAZ"):
-            bladnrPath = self.InputDir + "/" + bladnr.split("/")[-1]
-       else:
-            bladnrPath = self.InputDir + "/C_" + bladnr.upper() + ".LAZ"
-       return bladnrPath
+        '''
+        Parses the "bladnr" from the partitions CSV file.
+        
+        The following function is used to parse the bladnr for two possible formats of the bladnr:
+        1. 1234
+        2. /path/to/C_1234.LAZ
+        
+        Modify the following function if the bladnr format is different.
+
+        Parameters
+        ----------
+        bladnr: str
+            The bladnr to parse.
+
+        Returns
+        ----------
+        str
+            The path to the bladnr file in the input directory.
+        '''
+
+        if bladnr.upper().endswith(".LAZ"):
+             bladnrPath = self.InputDir + "/" + bladnr.split("/")[-1]
+        else:
+             bladnrPath = self.InputDir + "/C_" + bladnr.upper() + ".LAZ"
+        return bladnrPath
 
 
     def createPartitions(self):
-        ''' This function is used to create the partitions from the partitions CSV file. The partitions are created based on the size of the LAZ files and the max tmp space available. The partitions are stored in the lazPartitions list'''
+        '''
+        Creates the partitions from the partitions CSV file.
+        
+        The partitions are created based on the size of the LAZ files and the max tmp space available.
+        The partitions are stored in the lazPartitions list.
+        '''
+        
         LoggingWrapper.info("Creating partitions...", color="blue", bold=True)
         lazfileStats = {}
+
         with open(self.partitionsCSV, "r", newline='') as partitionFile:
             partition = csv.reader(partitionFile)
             colName = next(partition)
             bladnrIdx = colName.index("bladnr")
             partitionIdIdx = colName.index("partition_id")
+
             for row in partition:
                 if self.partitionsToProcess is not None:
                     if int(row[partitionIdIdx]) not in self.partitionsToProcess:
                         continue
+                
                 if row[partitionIdIdx] not in lazfileStats:
                     lazfileStats[row[partitionIdIdx]] = {}
                     lazfileStats[row[partitionIdIdx]]["bladnr"] = [row[bladnrIdx]]
@@ -442,11 +545,13 @@ class PotreeConverterBatched:
             filesinPartition = {}
             filesinPartition["files"] = []
             filesinPartition["id"] = id
+
             for bladnr in lazfileStats[id]["bladnr"]:
                 bladnrPath = self.parseBladnr(bladnr)
                 filesinPartition["files"].append(bladnrPath)
                 partitionSize += Path(bladnrPath).stat().st_size
             filesinPartition["size"] = partitionSize
+
             if (self.lazCompressionRatio + 2 + 1) * partitionSize <= self.maxTmpSpaceAvailable:
                 filesinPartition["status"] = "do"
             else:
@@ -458,7 +563,12 @@ class PotreeConverterBatched:
 
 
     def createDirectories(self):
-        ''' This function is used to create the directories for the PotreeConverterMPI program. It also copies the headers to the temporary directory'''
+        '''
+        Creates the directories for the PotreeConverterMPI program.
+        
+        Also copies the LAZ headers to the temporary directory.
+        '''
+        
         LoggingWrapper.info("Creating directories...", color="blue", bold=True)
         if not Path(self.InputDir).exists():
             LoggingWrapper.error("Input directory " + self.InputDir + " does not exist")
