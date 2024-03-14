@@ -21,6 +21,8 @@ mkdir -p "$path_to_laz_headers_dir"
 for lazfile in "$path_to_laz_dir"/*.{laz,LAZ,Laz}; do
     filename=$(basename -- "$lazfile")
     filestemname="${filename%.*}"
-    pdal info --metadata "$lazfile" > "$path_to_laz_headers_dir/${filestemname}.json"
-    echo "Header for $lazfile written to $path_to_laz_headers_dir/${filestemname}.json"
+    if test -f "$lazfile"; then
+        pdal info --metadata "$lazfile" > "$path_to_laz_headers_dir/${filestemname}.json"
+        echo "Header for $lazfile written to $path_to_laz_headers_dir/${filestemname}.json"
+    fi
 done
