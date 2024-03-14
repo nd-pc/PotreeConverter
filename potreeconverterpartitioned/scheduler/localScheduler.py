@@ -14,8 +14,10 @@ class LocalScheduler(Scheduler):
         self.exitCode = programCommandStatus.returncode
         if programCommandStatus.returncode == 0:
             self.jobStatus = "COMPLETED"
-        elif self.jobStatus != "KILLED":
-            self.jobStatus = "FAILED"
+        else:
+            if self.jobStatus != "KILLED":
+                self.jobStatus = "FAILED"
+            LoggingWrapper.info("Process " + self.programName + " (id:" + str(self.process.pid) +") " + self.jobStatus, color = "yellow")
         exit(programCommandStatus.returncode)
     def launchJob(self):
         """Launches the job"""
