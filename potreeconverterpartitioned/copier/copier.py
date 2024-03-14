@@ -7,7 +7,7 @@ from potreeconverterpartitioned.loggingwrapper import LoggingWrapper
 
 class Copier:
 
-    '''Copier classs is  used forcopying files from one location to another.
+    '''Copier classs is used forcopying files from one location to another.
     It copyies the files in batches.
     The copier class keeps track of the batches that are copied and the total size of the files that are copied.'''
 
