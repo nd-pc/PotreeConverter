@@ -59,5 +59,5 @@ Note, this program is tested with OpenMPI 4.1.1 which implements the MPI 3.1 sta
 # 	  * Random sampling: ```PotreeConverter.exe <input> -o <outputDir> -m random```
 2. Run ```util_scripts/create_json_headers.sh /path/to/input/laz/directory /path/to/laz/headers/directory```
 3. Configure program parameters in ini file. A template is provided in examples/mpi.ini
-4. Run ```python3 PotreeConverterPartitioned/run_PotreeConverterBatch.py <path/to/ini/configuration/file>```
+4. Run ```python3 run_PotreeConverterBatched.py <path/to/ini/configuration/file>```
 	* Either run locally, or on a cluster with SLURM or PBS scheduler. The parallel process should be run on the login node.
