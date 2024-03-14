@@ -572,6 +572,8 @@ class PotreeConverterBatched:
         '''
         
         LoggingWrapper.info("Creating directories...", color="blue", bold=True)
+
+        # Create input directory.
         if not Path(self.InputDir).exists():
             LoggingWrapper.error("Input directory " + self.InputDir + " does not exist")
             exit(1)
@@ -591,10 +593,12 @@ class PotreeConverterBatched:
                 exit(1)
         LoggingWrapper.info("Creating directory " + self.tmpDir + " for temporarily storing partial input and output...")
         Path(self.tmpDir).mkdir()
+
         if self.tmpInputDir != self.InputDir:
             Path(self.tmpInputDir).mkdir()
         Path(self.tmpOutputDir).mkdir()
 
+        # Create output directory.
         if Path(self.OutputDir).exists():
             print("Output directory " + self.OutputDir + " already exists. Do you want to overwrite it? (y/n)")
             answer = input()
@@ -607,11 +611,15 @@ class PotreeConverterBatched:
                 exit(1)
         LoggingWrapper.info("Creating output directory " + self.OutputDir + "...")
         Path(self.OutputDir).mkdir()
+
+        # Create LAZ header directory.
         LoggingWrapper.info("Creating directory " + self.lazHeadersDir + " for temporarily storing headers...")
         Path(self.lazHeadersDir).mkdir()
         lazHeaders = []
         for entry in self.lazPartitions:
             lazHeaders.extend(map(lambda x: self.lazHeadersToCopy + "/" + Path(x).stem + ".json", entry["files"]))
+
+        # Copy LAZ headers.
         LoggingWrapper.info("Copying headers...", color="blue", bold=True)
         self.miscCopier.copyFiles(lazHeaders, self.lazHeadersDir)
         pathsCount = 0
@@ -624,6 +632,7 @@ class PotreeConverterBatched:
             LoggingWrapper.error("No LAZ files to process in the input directory")
             exit(1)
         LoggingWrapper.info("Done copying headers", color="green", bold=True)
+
         Path(self.tmpOutputDir + "/counting_copy_done_signals").mkdir()
         Path(self.tmpOutputDir + "/indexing_copy_done_signals").mkdir()
         Path(self.tmpOutputDir + "/distribution_copy_done_signals").mkdir()
@@ -632,8 +641,10 @@ class PotreeConverterBatched:
         Path(self.tmpOutputDir + "/distribution_done_signals").mkdir()
         LoggingWrapper.info("Done creating directories", color="green", bold=True)
 
+
     def removeDirectories(self, directories):
-        ''' This function is used to remove the directories'''
+        ''' Removes directories. '''
+        
         for directory in directories:
             shutil.rmtree(directory)
 

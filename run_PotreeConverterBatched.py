@@ -70,7 +70,7 @@ if __name__ == "__main__":
         exit(1)
     # If both jobs finished successfully, exit.
     elif potreeConverterBatched.scheduler.getJobExitCode() != 0 and PotreeConverterMPICopier.exitcode != 0:
-        LoggingWrapper.error("Batch copier and PotreeConverterMPI  failed")
+        LoggingWrapper.error("Batch copier and PotreeConverterMPI failed")
         exit(1)
     # If partition loader finished successfully, wait for PotreeConverterMPI to finish.
     elif potreeConverterBatched.scheduler.isJobAlive()  and PotreeConverterMPICopier.exitcode == 0:
