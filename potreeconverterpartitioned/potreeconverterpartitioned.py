@@ -581,10 +581,10 @@ class PotreeConverterBatched:
             LoggingWrapper.error("Headers directory " + self.lazHeadersToCopy + " does not exist")
             exit(1)
 
-
+        # Create temporary directory.
         if Path(self.tmpDir).exists():
             print("Directory "  + self.tmpDir  + " for temporarily storing partial input and output already exists. Do you want to overwrite it? (y/n)")
-            answer = input()
+            answer = "y"#input()
             if answer == "y" or answer == "Y":
                 LoggingWrapper.info("Removing directory " + self.tmpDir + " for temporarily storing partial input and output...")
                 shutil.rmtree(self.tmpDir)
@@ -596,12 +596,14 @@ class PotreeConverterBatched:
 
         if self.tmpInputDir != self.InputDir:
             Path(self.tmpInputDir).mkdir()
+        if Path(self.tmpOutputDir).exists():
+            shutil.rmtree(self.tmpOutputDir)
         Path(self.tmpOutputDir).mkdir()
 
         # Create output directory.
         if Path(self.OutputDir).exists():
             print("Output directory " + self.OutputDir + " already exists. Do you want to overwrite it? (y/n)")
-            answer = input()
+            answer = "y"#input()
             if answer == "y" or answer == "Y":
                 LoggingWrapper.info("Removing output directory " + self.OutputDir + "...")
                 shutil.rmtree(self.OutputDir)
