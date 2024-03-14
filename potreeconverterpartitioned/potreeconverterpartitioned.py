@@ -560,6 +560,8 @@ class PotreeConverterBatched:
 
             self.lazPartitions.append(filesinPartition)
         LoggingWrapper.info("Done creating partitions. Total partitions: " + str(len(self.lazPartitions)), color="green", bold=True)
+        for partition in self.lazPartitions:
+            LoggingWrapper.info("partition " + partition["id"] + " (" + partition["status"] + "): " + str(partition["files"]))
 
 
     def createDirectories(self):
