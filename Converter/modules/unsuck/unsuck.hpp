@@ -38,7 +38,6 @@ static long long unsuck_start_time = high_resolution_clock::now().time_since_epo
 
 static double Infinity = std::numeric_limits<double>::infinity();
 
-
 #if defined(__linux__)
 constexpr auto fseek_64_all_platforms = fseeko64;
 #elif defined(WIN32)
@@ -66,6 +65,8 @@ struct CpuData {
 MemoryData getMemoryData();
 
 CpuData getCpuData();
+
+void setNumProcessors(int num);
 
 void printMemoryReport();
 
@@ -197,12 +198,15 @@ inline double now() {
 }
 
 
-inline void printElapsedTime(string label, double startTime) {
+inline double printElapsedTime(string label, double startTime) {
 
 	double elapsed = now() - startTime;
 
-	string msg = label + ": " + to_string(elapsed) + "s\n";
-	cout << msg;
+    if (label != "") {
+        string msg = label + ": " + to_string(elapsed) + "s\n";
+        cout << msg;
+    }
+    return elapsed;
 }
 
 
@@ -280,7 +284,23 @@ inline std::vector<int64_t> random(int64_t min, int64_t max, int64_t n) {
 	return values;
 }
 
+//From chatGPT: Write a C++ function that takes in a delimiter and astring as input parameters and returns a vector of string splitted at the delimitter?
+inline std::vector<std::string> splitString(const std::string& delimiter, const std::string& inputString) {
+    std::vector<std::string> result;
+    std::string::size_type startPos = 0;
+    std::string::size_type endPos = inputString.find(delimiter);
 
+    while (endPos != std::string::npos) {
+        result.push_back(inputString.substr(startPos, endPos - startPos));
+        startPos = endPos + delimiter.length();
+        endPos = inputString.find(delimiter, startPos);
+    }
+
+    // Add the remaining substring (or the whole string if no delimiter was found)
+    result.push_back(inputString.substr(startPos, endPos));
+
+    return result;
+}
 
 inline string stringReplace(string str, string search, string replacement) {
 
@@ -333,6 +353,8 @@ inline bool iEndsWith(const std::string& str, const std::string& suffix) {
 	return icompare(tstr, suffix);
 }
 
+
+
 // taken from: https://stackoverflow.com/questions/2602013/read-whole-ascii-file-into-c-stdstring/2602060
 inline string readTextFile(string path) {
 
@@ -362,16 +384,24 @@ inline string readTextFile(string path) {
 // 	return buffer;
 // }
 
-inline shared_ptr<Buffer> readBinaryFile(string path) {
 
-	auto file = fopen(path.c_str(), "rb");
-	auto size = fs::file_size(path);
 
-	//vector<uint8_t> buffer(size);
-	auto buffer = make_shared<Buffer>(size);
+inline shared_ptr<Buffer> readBinaryFile(vector<string> &paths) {
 
-	fread(buffer->data, 1, size, file);
-	fclose(file);
+    int64_t size = 0;
+    for (auto &path : paths) {
+        size += fs::file_size(path);
+    }
+    auto buffer = make_shared<Buffer>(size);
+    int64_t offset = 0;
+    for (auto &path : paths) {
+        auto file = fopen(path.c_str(), "rb");
+        fread((uint8_t*) buffer->data  +  offset, 1, fs::file_size(path), file);
+        offset += fs::file_size(path);
+        fclose(file);
+    }
+
+
 
 	return buffer;
 }
@@ -553,7 +583,6 @@ inline void logDebug(string message) {
 }
 
 
-
 template<typename T>
 T read(vector<uint8_t>& buffer, int offset) {
 	//T value = reinterpret_cast<T*>(buffer.data() + offset)[0];
@@ -563,6 +592,7 @@ T read(vector<uint8_t>& buffer, int offset) {
 
 	return value;
 }
+
 
 
 

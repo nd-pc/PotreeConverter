@@ -26,6 +26,7 @@ namespace logger{
 
 static shared_ptr<std::ofstream> fout = nullptr;
 
+
 mutex mtx;
 
 void addOutputFile(string path) {
@@ -88,11 +89,16 @@ void error(string msg, string file, int line) {
 
 	cout << str << endl;
 
+
 	if (fout != nullptr) {
 		lock_guard<mutex> lock(mtx);
 		*fout << str << endl;
 	}
 
+
+
+
 }
+
 
 }

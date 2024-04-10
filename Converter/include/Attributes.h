@@ -106,6 +106,9 @@ inline AttributeType typenameToType(string name) {
 	}
 }
 
+// See asprs.org/a/society/committees/standards/asprs_las_formathttps://www.asprs.org/a/society/committees/standards/asprs_las_format_v12.pdf_v12.pdf
+// for more information about the attribute types
+
 struct Attribute {
 	string name = "";
 	string description = "";
@@ -136,6 +139,25 @@ struct Attribute {
 		this->elementSize = elementSize;
 		this->type = type;
 	}
+
+    void print(std::ostream& os) const {
+        std::cout << "Name: " << name << std::endl;
+        std::cout << "Description: " << description << std::endl;
+        std::cout << "Size: " << size << std::endl;
+        std::cout << "Number of Elements: " << numElements << std::endl;
+        std::cout << "Element Size: " << elementSize << std::endl;
+        std::cout << "Attribute Type: " << static_cast<int>(type) << std::endl;
+        std::cout << "Min (x, y, z): " << min.x << ", " << min.y << ", " << min.z << std::endl;
+        std::cout << "Max (x, y, z): " << max.x << ", " << max.y << ", " << max.z << std::endl;
+        std::cout << "Scale (x, y, z): " << scale.x << ", " << scale.y << ", " << scale.z << std::endl;
+        std::cout << "Offset (x, y, z): " << offset.x << ", " << offset.y << ", " << offset.z << std::endl;
+
+        std::cout << "Histogram:" << std::endl;
+        for (int i = 0; i < histogram.size(); ++i) {
+            std::cout << "  [" << i << "]: " << histogram[i] << std::endl;
+        }
+    }
+
 };
 
 struct Attributes {
@@ -172,6 +194,14 @@ struct Attributes {
 
 		return -1;
 	}
+
+    void print(std::ostream& os) const {
+        std::cout << "Attributes:" << std::endl;
+        for (auto& attribute : list) {
+            attribute.print(os);
+            os << std::endl;
+        }
+    }
 
 	Attribute* get(string name) {
 		for (auto& attribute : list) {

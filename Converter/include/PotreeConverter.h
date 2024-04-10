@@ -2,9 +2,13 @@
 #pragma once
 
 #include <execution>
+#include <regex>
 
 #include "Vector3.h"
 #include "LasLoader/LasLoader.h"
+#include "logger.h"
+
+
 
 struct Dbg {
 
@@ -77,14 +81,14 @@ inline ScaleOffset computeScaleOffset(Vector3 min, Vector3 max, Vector3 targetSc
 
 
 
-inline vector<Attribute> parseExtraAttributes(LasHeader& header) {
+inline vector<Attribute> parseExtraAttributes(Source& header) {
 
 	// vector<uint8_t> extraData;
 	vector<Attribute> attributes;
 
-	for (auto& vlr : header.vlrs) {
-		if (vlr.recordID == 4) {
-			auto extraData = vlr.data;
+	for (auto& v : header.vlrs) {
+		if (v.recordID == 4) {
+			auto extraData = v.data;
 
 			constexpr int recordSize = 192;
 			int numExtraAttributes = extraData.size() / recordSize;
@@ -133,7 +137,7 @@ inline vector<Attribute> parseExtraAttributes(LasHeader& header) {
 }
 
 
-inline vector<Attribute> computeOutputAttributes(LasHeader& header) {
+inline vector<Attribute> computeOutputAttributes(Source& header) {
 	auto format = header.pointDataFormat;
 
 	Attribute xyz("position", 12, 3, 4, AttributeType::INT32);
@@ -192,7 +196,26 @@ inline vector<Attribute> computeOutputAttributes(LasHeader& header) {
 	return list;
 }
 
-inline Attributes computeOutputAttributes(vector<Source>& sources, vector<string> requestedAttributes) {
+//The bounds of the pointcloud to be converted are given in the format: [minx,maxx],[miny,maxy],[minz,maxz] on the command line
+//This function parses the string and returns the min and max values
+inline void parseBoundString(const std::string& boundString, Vector3 &min, Vector3 &max) {
+    // Define the regex pattern
+    std::regex pattern("\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\]");
+
+    // Match the input string against the regex pattern
+    std::smatch matches;
+    if (std::regex_match(boundString, matches, pattern)) {
+        // Extract matched values
+        min = {std::stod(matches[1].str()), std::stod(matches[3].str()), std::stod(matches[5].str())};
+        max = {std::stod(matches[2].str()), std::stod(matches[4].str()), std::stod(matches[6].str())};
+
+    } else {
+        // Parsing failed, raise an error
+        logger::ERROR("The string passed to --bound option is not valid. The expected format is: [min_x,max_x],[min_y,max_y],[min_z,max_z]");
+        exit(123);
+    }
+}
+inline Attributes computeOutputAttributes(vector<Source> &sources, vector<string> requestedAttributes, string boundString = "") {
 	// TODO: a bit wasteful to iterate over source files and load headers twice
 
 	Vector3 scaleMin = { Infinity, Infinity, Infinity };
@@ -210,9 +233,8 @@ inline Attributes computeOutputAttributes(vector<Source>& sources, vector<string
 		auto parallel = std::execution::par;
 		for_each(parallel, sources.begin(), sources.end(), [&mtx, &sources, &scaleMin, &min, &max, requestedAttributes, &fullAttributeList, &acceptedAttributeNames](Source source) {
 
-			auto header = loadLasHeader(source.path);
 
-			vector<Attribute> attributes = computeOutputAttributes(header);
+			vector<Attribute> attributes = computeOutputAttributes(source);
 
 			mtx.lock();
 
@@ -225,20 +247,24 @@ inline Attributes computeOutputAttributes(vector<Source>& sources, vector<string
 				}
 			}
 
-			scaleMin.x = std::min(scaleMin.x, header.scale.x);
-			scaleMin.y = std::min(scaleMin.y, header.scale.y);
-			scaleMin.z = std::min(scaleMin.z, header.scale.z);
+			scaleMin.x = std::min(scaleMin.x, source.scale.x);
+			scaleMin.y = std::min(scaleMin.y, source.scale.y);
+			scaleMin.z = std::min(scaleMin.z, source.scale.z);
 
-			min.x = std::min(min.x, header.min.x);
-			min.y = std::min(min.y, header.min.y);
-			min.z = std::min(min.z, header.min.z);
+			min.x = std::min(min.x, source.min.x);
+			min.y = std::min(min.y, source.min.y);
+			min.z = std::min(min.z, source.min.z);
 
-			max.x = std::max(max.x, header.max.x);
-			max.y = std::max(max.y, header.max.y);
-			max.z = std::max(max.z, header.max.z);
+			max.x = std::max(max.x, source.max.x);
+			max.y = std::max(max.y, source.max.y);
+			max.z = std::max(max.z, source.max.z);
 
 			mtx.unlock();
 			});
+
+        if (!boundString.empty()) {
+            parseBoundString(boundString, min, max);
+        }
 
 		auto scaleOffset = computeScaleOffset(min, max, scaleMin);
 		scale = scaleOffset.scale;

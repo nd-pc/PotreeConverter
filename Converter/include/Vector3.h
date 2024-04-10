@@ -7,6 +7,7 @@
 #include <sstream>
 #include <algorithm>
 #include <string>
+#include <cstring>
 
 using std::string;
 
@@ -32,7 +33,9 @@ struct Vector3{
 		this->z = value[2];
 	}
 
-	double squaredDistanceTo(const Vector3& right) {
+
+
+    double squaredDistanceTo(const Vector3& right) {
 		double dx = right.x - x;
 		double dy = right.y - y;
 		double dz = right.z - z;
@@ -86,7 +89,7 @@ struct Vector3{
 		return Vector3(x * scalar, y * scalar, z * scalar);
 	}
 
-	string toString() {
+	string toString() const {
 
 		auto digits = std::numeric_limits<double>::max_digits10;
 

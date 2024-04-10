@@ -6,6 +6,7 @@
 #include "structures.h"
 #include "Attributes.h"
 #include "PotreeConverter.h"
+#include "record_timings.hpp"
 
 
 struct SamplerPoisson : public Sampler {
@@ -147,7 +148,6 @@ struct SamplerPoisson : public Sampler {
 
 					//dbgChecks++;
 					//dbgSumChecks++;
-
 					// check distance to center
 					auto px = point.x - center.x;
 					auto py = point.y - center.y;
@@ -179,6 +179,7 @@ struct SamplerPoisson : public Sampler {
 
 			};
 
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "sorting in indexing time");
 			auto parallel = std::execution::par_unseq;
 			std::sort(parallel, points.begin(), points.end(), [center](Point a, Point b) -> bool {
 
@@ -201,6 +202,7 @@ struct SamplerPoisson : public Sampler {
 				// sort by z axis
 				//return a.z < b.z;
 			});
+            RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "sorting in indexing time");
 
 			for (Point point : points) {
 

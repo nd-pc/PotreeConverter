@@ -216,7 +216,7 @@ public:
 				return &arg;
 			}
 		}
-		
+
 		return nullptr;
 	}
 

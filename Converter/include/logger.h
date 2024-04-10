@@ -2,6 +2,8 @@
 #pragma once
 
 #include <string>
+#include <fstream>
+#include <memory>
 
 using std::string;
 

@@ -1,27 +1,33 @@
 
 
+
 #include <iostream>
 #include <execution>
-
+#include "MPIcommon.h"
 #include "unsuck/unsuck.hpp"
 #include "chunker_countsort_laszip.h"
 #include "indexer.h"
 #include "sampler_poisson.h"
 #include "sampler_poisson_average.h"
 #include "sampler_random.h"
-#include "Attributes.h"
-#include "PotreeConverter.h"
 #include "logger.h"
-#include "Monitor.h"
 
 #include "arguments/Arguments.hpp"
+
+#include "record_timings.hpp"
+
+
+using json = nlohmann::json;
+
+
 
 using namespace std;
 
 Options parseArguments(int argc, char** argv) {
 	Arguments args(argc, argv);
 
-	args.addArgument("source,i,", "Input file(s)");
+
+    args.addArgument("header-dir", "LAS/LAZ headers directory");
 	args.addArgument("help,h", "Display help information");
 	args.addArgument("outdir,o", "Output directory");
 	args.addArgument("encoding", "Encoding type \"BROTLI\", \"UNCOMPRESSED\" (default)");
@@ -34,6 +40,9 @@ Options parseArguments(int argc, char** argv) {
 	args.addArgument("projection", "Add the projection of the pointcloud to the metadata");
 	args.addArgument("generate-page,p", "Generate a ready to use web page with the given name");
 	args.addArgument("title", "Page title used when generating a web page");
+    args.addArgument("threads", "Number of threads to use");
+    args.addArgument("bounds", "Bounds of the pointcloud to be converted. The format shoud be: [minx,maxx],[miny,maxy],[minz,maxz]. If not provided, the bounds will be computed from the input files.");
+    args.addArgument("max-mem", "Maximum memory to be used by the program in GB. If not provided, the program will use all the available memory.");
 
 	if (args.has("help")) {
 		cout << "PotreeConverter <source> -o <outdir>" << endl;
@@ -41,22 +50,24 @@ Options parseArguments(int argc, char** argv) {
 		exit(0);
 	}
 
-	if (!args.has("source")) {
-		cout << "PotreeConverter <source> -o <outdir>" << endl;
-		cout << endl << "For a list of options, use --help or -h" << endl;
+    if (!args.has("header-dir")) {
+        cout << "No headers directory specified" << endl;
+        cout << "PotreeConverterMPI  -o <outdir> --header-dir <header-dir>" << endl;
+        cout << endl << "For a list of options, use --help or -h" << endl;
 
-		exit(1);
-	}
+        exit(1);
+    }
 
-	vector<string> source = args.get("source").as<vector<string>>();
+    string headerDir = args.get("header-dir").as<string>();
 
-	if (source.size() == 0) {
-		cout << "PotreeConverter <source> -o <outdir>" << endl;
-		cout << endl << "For a list of options, use --help or -h" << endl;
+    if (!fs::is_directory(headerDir)) {
 
-		exit(1);
-	}
+        cout << "header-dir is not a directory" << endl;
+        cout << "PotreeConverterMPI -i <input data directory> -o <outdir> --head-dir <header-dir>" << endl;
+        cout << endl << "For a list of options, use --help or -h" << endl;
 
+        exit(1);
+    }
 	string encoding = args.get("encoding").as<string>("DEFAULT");
 	string method = args.get("method").as<string>("poisson");
 	string chunkMethod = args.get("chunkMethod").as<string>("LASZIP");
@@ -65,44 +76,16 @@ Options parseArguments(int argc, char** argv) {
 	if (args.has("outdir")) {
 		outdir = args.get("outdir").as<string>();
 	} else {
+        cout << "No output directory specified" << endl;
+        cout << "PotreeConverterMPI  -o <outdir> --header-dir <header-dir>" << endl;
+        cout << endl << "For a list of options, use --help or -h" << endl;
 
-		string sourcepath = source[0];
-		fs::path path(sourcepath);
-
-		//cout << fs::canonical(source[0]) << endl;
-		//exit(123);
-
-		if (!fs::exists(path)) {
-
-			logger::ERROR("file does not exist: " + source[0]);
-
-			exit(123);
-		} 
-
-		path = fs::canonical(path);
-
-		string suggestedBaseName = path.filename().string() + "_converted";
-		outdir = sourcepath + "/../" + suggestedBaseName;
-
-		int i = 1;
-		while(fs::exists(outdir)) {
-			outdir = sourcepath + "/../" + suggestedBaseName + "_" + std::to_string(i);
-
-			if (i > 100) {
-
-				logger::ERROR("unsuccessfully tried to find empty output directory. stopped at 100 iterations: " + outdir);
-
-				exit(123);
-			}
-
-			i++;
-		}
+        exit(1);
 
 	}
 
 	outdir = fs::weakly_canonical(fs::path(outdir)).string();
-
-	//vector<string> flags = args.get("flags").as<vector<string>>();
+    headerDir = fs::weakly_canonical(fs::path(headerDir)).string();
 
 	vector<string> attributes = args.get("attributes").as<vector<string>>();
 
@@ -117,91 +100,44 @@ Options parseArguments(int argc, char** argv) {
 	bool keepChunks = args.has("keep-chunks");
 	bool noChunking = args.has("no-chunking");
 	bool noIndexing = args.has("no-indexing");
+    bool boundsProvided = args.has("bounds");
+
 
 	Options options;
-	options.source = source;
 	options.outdir = outdir;
+    options.headerDir = headerDir;
 	options.method = method;
 	options.encoding = encoding;
 	options.chunkMethod = chunkMethod;
-	//options.flags = flags;
 	options.attributes = attributes;
 	options.generatePage = generatePage;
 	options.pageName = pageName;
 	options.pageTitle = pageTitle;
 	options.projection = projection;
-
 	options.keepChunks = keepChunks;
 	options.noChunking = noChunking;
 	options.noIndexing = noIndexing;
+    if (boundsProvided) {
+        options.manualBounds = args.get("bounds").as<string>();
+        std::regex pattern("\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\],\\[(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)\\]");
+        std::smatch matches;
+        if (!std::regex_match( options.manualBounds, matches, pattern)) {
+            cout << "bounds format is not correct. The format should be: [minx,maxx],[miny,maxy],[minz,maxz]" << endl;
+            exit(1);
+        }
+    }
+    int maxThreads = (int)std::thread::hardware_concurrency();
+    int threads = args.get("threads").as<int>(maxThreads);
+    setNumProcessors(threads);
+    options.memoryBudget = args.get("max-mem").as<int>(getMemoryData().physical_total/(1024 * 1024 * 1024));
 
-	//cout << "flags: ";
-	//for (string flag : options.flags) {
-	//	cout << flag << ", ";
-	//}
-	//cout << endl;
+
+
 
 	return options;
 }
 
-struct Curated{
-	string name;
-	vector<Source> files;
-};
-Curated curateSources(vector<string> paths) {
 
-	string name = "";
-
-	vector<string> expanded;
-	for (auto path : paths) {
-		if (fs::is_directory(path)) {
-			for (auto& entry : fs::directory_iterator(path)) {
-				string str = entry.path().string();
-
-				if (iEndsWith(str, "las") || iEndsWith(str, "laz")) {
-					expanded.push_back(str);
-				}
-			}
-		} else if (fs::is_regular_file(path)) {
-			if (iEndsWith(path, "las") || iEndsWith(path, "laz")) {
-				expanded.push_back(path);
-			}
-		}
-
-		if (name.size() == 0) {
-			name = fs::path(path).stem().string();
-		}
-	}
-	paths = expanded;
-
-	cout << "#paths: " << paths.size() << endl;
-
-	vector<Source> sources;
-	sources.reserve(paths.size());
-
-	mutex mtx;
-	auto parallel = std::execution::par;
-	for_each(parallel, paths.begin(), paths.end(), [&mtx, &sources](string path) {
-
-		auto header = loadLasHeader(path);
-		auto filesize = fs::file_size(path);
-
-		Vector3 min = { header.min.x, header.min.y, header.min.z };
-		Vector3 max = { header.max.x, header.max.y, header.max.z };
-
-		Source source;
-		source.path = path;
-		source.min = min;
-		source.max = max;
-		source.numPoints = header.numPoints;
-		source.filesize = filesize;
-
-		lock_guard<mutex> lock(mtx);
-		sources.push_back(source);
-	});
-
-	return {name, sources};
-}
 
 
 
@@ -211,8 +147,92 @@ struct Stats {
 	int64_t totalBytes = 0;
 	int64_t totalPoints = 0;
 };
+struct MinMax {
+    Vector3 min = { Infinity , Infinity , Infinity };
+    Vector3 max = { -Infinity , -Infinity , -Infinity };
+};
 
-Stats computeStats(vector<Source> sources){
+
+vector<Source> curateHeaders(string headerDir) {
+
+
+    vector<string> headerFiles;
+    for (auto &entry: fs::directory_iterator(headerDir)) {
+                string str = entry.path().string();
+                if (iEndsWith(str, "json")) {
+                    headerFiles.push_back(str);
+                }
+    }
+
+    cout << "#paths: " << headerFiles.size() << endl;
+
+
+    vector<Source> sources;
+    //sources.reserve(headerFiles.size());
+
+    mutex mtx;
+    auto parallel = std::execution::par;
+    for_each(parallel, headerFiles.begin(), headerFiles.end(), [&mtx, &sources](string path) {
+
+        string headerText = readTextFile(path);
+        json js = json::parse(headerText);
+
+        Vector3 min = {
+                js["metadata"]["minx"].get<double>(),
+                js["metadata"]["miny"].get<double>(),
+                js["metadata"]["minz"].get<double>()
+        };
+
+
+        Vector3 max = {
+                js["metadata"]["maxx"].get<double>(),
+                js["metadata"]["maxy"].get<double>(),
+                js["metadata"]["maxz"].get<double>()
+        };
+
+        Vector3 scale = {
+                js["metadata"]["scale_x"].get<double>(),
+                js["metadata"]["scale_y"].get<double>(),
+                js["metadata"]["scale_z"].get<double>()
+        };
+
+
+        Source source;
+        source.path = path;
+        source.min = min;
+        source.max = max;
+        source.scale = scale;
+        source.numPoints =  js["metadata"]["count"].get<uint64_t>();
+        source.pointDataFormat =  js["metadata"]["dataformat_id"].get<uint8_t>();
+        source.pointDataRecordLength =  js["metadata"]["point_length"].get<uint16_t>();
+        source.filesize = source.numPoints * source.pointDataRecordLength;
+        int n = 0;
+        while(js["metadata"].contains("vlr_"+ to_string(n))){
+            vlr v;
+            string str =  js["metadata"]["vlr_"+ to_string(n)]["data"].get<string>();
+            for (char c : str) {
+                v.data.push_back((uint8_t)c);
+            }
+            v.recordID =  js["metadata"]["vlr_"+ to_string(n)]["record_id"].get<uint16_t>();
+            source.vlrs.push_back(v);
+            n++;
+        }
+        source.type = SourceFileType::HEADER;
+
+
+        lock_guard<mutex> lock(mtx);
+
+        sources.push_back(source);
+    });
+
+
+    return std::move(sources);
+
+
+}
+
+
+Stats computeStats(vector<Source> headers, string boundString) {
 
 	Vector3 min = { Infinity , Infinity , Infinity };
 	Vector3 max = { -Infinity , -Infinity , -Infinity };
@@ -220,21 +240,23 @@ Stats computeStats(vector<Source> sources){
 	int64_t totalBytes = 0;
 	int64_t totalPoints = 0;
 
-	for(auto source : sources){
-		min.x = std::min(min.x, source.min.x);
-		min.y = std::min(min.y, source.min.y);
-		min.z = std::min(min.z, source.min.z);
-								
-		max.x = std::max(max.x, source.max.x);
-		max.y = std::max(max.y, source.max.y);
-		max.z = std::max(max.z, source.max.z);
+	for(auto source : headers){
+
+        min.x = std::min(min.x, source.min.x);
+        min.y = std::min(min.y, source.min.y);
+        min.z = std::min(min.z, source.min.z);
+
+        max.x = std::max(max.x, source.max.x);
+        max.y = std::max(max.y, source.max.y);
+        max.z = std::max(max.z, source.max.z);
 
 		totalPoints += source.numPoints;
-		totalBytes += source.filesize;
+		totalBytes += source.numPoints * source.pointDataRecordLength;
 	}
-
-
-	double cubeSize = (max - min).max();
+    if (!boundString.empty()) {
+        parseBoundString(boundString, min, max);
+    }
+	double cubeSize = ceil((max - min).max());
 	Vector3 size = { cubeSize, cubeSize, cubeSize };
 	max = min + cubeSize;
 
@@ -283,114 +305,282 @@ Stats computeStats(vector<Source> sources){
 	return { min, max, totalBytes, totalPoints };
 }
 
-// struct Monitor {
-// 	thread t;
-// 	bool stopRequested = false;
 
-// 	void stop() {
+shared_ptr<indexer::Chunks> indexing(Options& options, string chunksDir, State& state, indexer::Indexer& indexer, bool islastbatch, shared_ptr<map<string, vector<string>>> chunkFiletoPathMap, int batchNum) {
 
-// 		stopRequested = true;
-
-// 		t.join();
-// 	}
-// };
-
-// shared_ptr<Monitor> startMonitoring(State& state) {
-
-// 	shared_ptr<Monitor> monitor = make_shared<Monitor>();
-
-// 	monitor->t = thread([monitor, &state]() {
-
-// 		using namespace std::chrono_literals;
-
-// 		std::this_thread::sleep_for(1'000ms);
-
-// 		while (!monitor->stopRequested) {
-
-// 			auto ram = getMemoryData();
-// 			auto CPU = getCpuData();
-// 			double GB = 1024.0 * 1024.0 * 1024.0;
-
-// 			double throughput = (double(state.pointsProcessed) / state.duration) / 1'000'000.0;
-
-// 			double progressPass = 100.0 * state.progress();
-// 			double progressTotal = (100.0 * double(state.currentPass - 1) + progressPass) / double(state.numPasses);
-
-// 			string strProgressPass = formatNumber(progressPass) + "%";
-// 			string strProgressTotal = formatNumber(progressTotal) + "%";
-// 			string strTime = formatNumber(now()) + "s";
-// 			string strDuration = formatNumber(state.duration) + "s";
-// 			string strThroughput = formatNumber(throughput) + "MPs";
-
-// 			string strRAM = formatNumber(double(ram.virtual_usedByProcess) / GB, 1)
-// 				+ "GB (highest " + formatNumber(double(ram.virtual_usedByProcess_max) / GB, 1) + "GB)";
-// 			string strCPU = formatNumber(CPU.usage) + "%";
-
-// 			stringstream ss;
-// 			ss << "[" << strProgressTotal << ", " << strTime << "], "
-// 				<< "[" << state.name << ": " << strProgressPass << ", duration: " << strDuration << ", throughput: " << strThroughput << "]"
-// 				<< "[RAM: " << strRAM << ", CPU: " << strCPU << "]";
-
-// 			cout << ss.str() << endl;
-
-// 			std::this_thread::sleep_for(1'000ms);
-// 		}
-
-// 	});
-
-// 	return monitor;
-// }
+    if (options.noIndexing) {
+        return nullptr;
+    }
 
 
-void chunking(Options& options, vector<Source>& sources, string targetDir, Stats& stats, State& state, Attributes outputAttributes, Monitor* monitor) {
+    if (options.method == "random") {
 
-	if (options.noChunking) {
-		return;
-	}
+        SamplerRandom sampler;
+        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch, chunkFiletoPathMap, batchNum);
 
-	if (options.chunkMethod == "LASZIP") {
+    } else if (options.method == "poisson") {
 
-		chunker_countsort_laszip::doChunking(sources, targetDir, stats.min, stats.max, state, outputAttributes, monitor);
+        SamplerPoisson sampler;
+        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch, chunkFiletoPathMap, batchNum);
 
-	} else if (options.chunkMethod == "LAS_CUSTOM") {
+    } else if (options.method == "poisson_average") {
 
-		//chunker_countsort::doChunking(sources[0].path, targetDir, state);
+        SamplerPoissonAverage sampler;
+        return indexer::doIndexing(chunksDir, state, options, sampler, indexer, islastbatch, chunkFiletoPathMap, batchNum);
 
-	} else if (options.chunkMethod == "SKIP") {
-
-		// skip chunking
-
-	} else {
-
-		cout << "ERROR: unkown chunk method: " << options.chunkMethod << endl;
-		exit(123);
-
-	}
+    }
+    else {
+        cout << "ERROR: unkown sampling method: " << options.method << endl;
+        exit(123);
+    }
 }
 
-void indexing(Options& options, string targetDir, State& state) {
+void finalMerge(Options& options, string targetDir, State& state, indexer::Indexer& indexer, shared_ptr<indexer::Chunks> chunks) {
 
-	if (options.noIndexing) {
-		return;
-	}
 
-	if (options.method == "random") {
+    if (options.method == "random") {
 
-		SamplerRandom sampler;
-		indexer::doIndexing(targetDir, state, options, sampler);
+        SamplerRandom sampler;
+        doFinalMerge(indexer, chunks, targetDir, sampler, options, state);
 
-	} else if (options.method == "poisson") {
+    } else if (options.method == "poisson") {
 
-		SamplerPoisson sampler;
-		indexer::doIndexing(targetDir, state, options, sampler);
+        SamplerPoisson sampler;
+        doFinalMerge(indexer, chunks, targetDir, sampler, options, state);
 
-	} else if (options.method == "poisson_average") {
+    } else if (options.method == "poisson_average") {
 
-		SamplerPoissonAverage sampler;
-		indexer::doIndexing(targetDir, state, options, sampler);
+        SamplerPoissonAverage sampler;
+        doFinalMerge(indexer, chunks, targetDir, sampler, options, state);
 
-	}
+    }
 }
+
+
+shared_ptr<map<string, vector<string>>> mapChunkstoPaths(string targetDir){
+    // Traverse through the "chunk_<process_id>" directories and create a map of chunk file names to the paths of the chunk files.
+    shared_ptr<map<string, vector<string>>> chunkFiletoPathMap = make_shared<map<string, vector<string>>>();
+    for (int i = 0; i < n_processes; i++) {
+        for (auto& entry : fs::directory_iterator(targetDir + "/" + "chunks_" + to_string(i))) {
+            auto filepath = entry.path();
+            if (iEndsWith(filepath.string(), ".bin")) {
+                (*chunkFiletoPathMap)[filepath.filename().string()].push_back(filepath.string());
+            }
+        }
+    }
+    return chunkFiletoPathMap;
+
+
+}
+void process(Options& options, Stats& stats, State& state, string targetDir, Attributes &outputAttributes, Monitor* monitor) {
+
+    chunker_countsort_laszip::NodeLUT lut;
+    if (options.noChunking) {
+        return;
+    }
+    // if is always executed
+    if (options.chunkMethod == "LASZIP") {
+
+        lut = chunker_countsort_laszip::doCounting(stats.min, stats.max, state, targetDir, outputAttributes,
+                                                       monitor);
+
+    } else if (options.chunkMethod == "LAS_CUSTOM") {
+
+        //chunker_countsort::doChunking(sources[0].path, targetDir, state);
+
+    } else if (options.chunkMethod == "SKIP") {
+
+        // skip chunking
+
+    } else {
+
+        cout << "ERROR: unkown chunk method: " << options.chunkMethod << endl;
+        exit(123);
+
+    }
+
+    int batchNum = 0;
+    bool isLastbatch = false;
+    indexer::Indexer indexer(targetDir);
+    indexer.root = make_shared<Node>("r", stats.min, stats.max);
+    auto totalDistributionDuration = 0.0;
+    auto totalIndexingDuration = 0.0;
+    shared_ptr<indexer::Chunks> chunks = nullptr;
+    MPI_Barrier(MPI_COMM_WORLD);
+    if(process_id == ROOT)RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
+    auto indexDuration = 0.0;
+    int miniBatchNum = 0;
+    // Loop until all the batches are processed. In distribution + indexing a batch is a partition.
+    // For distribution, a partition is subdivided into mini-batches to overlap copying and processing.
+    while (!isLastbatch) {
+        bool isLastminiBatchinPartition = false;
+
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Total distribution time including copy wait time")
+        // Loop until all the mini-batches in a partition are processed.
+        while (!isLastminiBatchinPartition){
+            if(process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "waiting for copying in distribution")
+            // Wait for the copying of the mini-batch to be done.
+            while (!fs::exists(fs::path(targetDir + "/distribution_copy_done_signals/batchno_" + to_string(miniBatchNum) + "_written"))) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            }
+            if(process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "waiting for copying in distribution")
+            // The batchno_miniBatchNum_copied file is written by the copier after copying the mini-batch. It contains the list of laz files in the mini-batch.
+            // The second line in the file is "lastminibatchinpartition" if the mini-batch is the last mini-batch in the partition, otherwise it is "notlastminibatchinpartition".
+            fstream batchfiles;
+            batchfiles.open(targetDir + "/distribution_copy_done_signals/batchno_" + to_string(miniBatchNum) + "_copied", ios::in);
+            string lazFiles;
+            getline(batchfiles, lazFiles);
+            vector<string> lazFilesVec = splitString(",", lazFiles);
+            string lastbatch;
+            string lastminibatchinpartition;
+            getline(batchfiles, lastminibatchinpartition);
+            if (lastminibatchinpartition == "lastminibatchinpartition") {
+                isLastminiBatchinPartition = true;
+            } else if (lastminibatchinpartition == "notlastminibatchinpartition") {
+                isLastminiBatchinPartition = false;
+            } else {
+                cout << "ERROR: unkown batch type: " << lastminibatchinpartition << endl;
+                exit(123);
+            }
+            getline(batchfiles, lastbatch);
+            if (lastbatch == "lastbatch") {
+                isLastbatch = true;
+            } else if (lastbatch == "notlastbatch") {
+                isLastbatch = false;
+            } else {
+                cout << "ERROR: unkown batch type: " << lastbatch << endl;
+                exit(123);
+            }
+            batchfiles.close();
+            auto sources = curateSources(lazFilesVec);
+            MPI_Barrier(MPI_COMM_WORLD);
+            if (process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Distribution time");
+            auto tStartDist = now();
+            chunker_countsort_laszip::doDistribution(stats.min, stats.max, state, lut, targetDir + "/chunks_" + to_string(process_id), sources,
+                                                     outputAttributes, monitor);
+
+
+            MPI_Barrier(MPI_COMM_WORLD);
+            auto distDuration = now() - tStartDist;
+
+            totalDistributionDuration += distDuration;
+            if (process_id == ROOT)  RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Distribution time");
+            // Write the distribution done signal file. It contains the duration of the distribution.
+            if (process_id == ROOT) {
+                fstream signalToCopier;
+                signalToCopier.open(
+                        targetDir + "/distribution_done_signals/batchno_" + to_string(miniBatchNum) + "_distribution_done",
+                        ios::out);
+                if (isLastminiBatchinPartition) {
+                    signalToCopier << to_string(distDuration);
+                }
+                else {
+                    signalToCopier << "-1.0";
+                }
+                signalToCopier.close();
+                {
+                    fstream().open(
+                            targetDir + "/distribution_done_signals/batchno_" + to_string(miniBatchNum) + "_distribution" +
+                            "_time_written",
+                            ios::out);
+                }
+            }
+            miniBatchNum++;
+
+        }
+        cout.flush();
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (process_id == ROOT)
+            cout << "======Distribution for partition no. " << batchNum << " finished======" << endl;
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total distribution time including copy wait time")
+        // In distribution, it may be possible that  a chunk file may have been partially written by mutliple processes.
+        // Som traverse through the "chunk_<process_id>" directories and create a map of chunk file names to the paths of the chunk files.
+        // In the indexing phase, the chunk file paths are used to read the chunk files and index them.
+        // The files with the same name are treated as a single chunk file.
+        shared_ptr<map<string, vector<string>>> chunkFiletoPathMap = mapChunkstoPaths(targetDir);
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if(process_id == ROOT)RECORD_TIMINGS_START (recordTimings::Machine::cpu, "wait time for concatenating octree files");
+        // Beore indexing, wait until the output of the previous partitions is concatenated to octree.bin. We allow atmost output of two partitions to remain in the temporary storage.
+        while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-2) + "_concatenated")) && ((batchNum - 2) >= 0)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+        if (process_id == ROOT) RECORD_TIMINGS_STOP (recordTimings::Machine::cpu, "wait time for concatenating octree files");
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        if(process_id == ROOT) {
+            RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Indexing time");
+        }
+        auto tStartIndex = now();
+        chunks = indexing(options, targetDir + "/chunks_" + to_string(process_id), state, indexer, isLastbatch, chunkFiletoPathMap, batchNum);
+        MPI_Barrier(MPI_COMM_WORLD);
+        indexDuration = now() - tStartIndex;
+        totalIndexingDuration += indexDuration;
+        if(process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Indexing time");
+
+
+        if(process_id == ROOT) {
+
+            if (!isLastbatch) {
+                fstream signalToCopier;
+                signalToCopier.open(targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum) + "_indexing_done", ios::out);
+                signalToCopier << to_string(indexDuration);// << "\n" << "msgcomplete";
+                signalToCopier.close();
+                {
+                    fstream().open(
+                            targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum) + "_indexing"+ "_time_written",
+                            ios::out);
+                }
+            }
+        }
+        cout.flush();
+        batchNum++;
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (process_id == ROOT)
+            cout << "======Indexing for partition no. " << batchNum << " finished======" << endl;
+
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (process_id == ROOT) {
+        state.values["duration(distribution)"] = formatNumber(totalDistributionDuration, 3);
+        state.values["duration(indexing)"] = formatNumber(totalIndexingDuration, 3);
+        cout << "======DISTRIUBTION AND INDEXING FINISHED======" << endl;
+    }
+    if(process_id == ROOT)RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Total indexing and distribution time including copy wait time")
+
+
+    cout << "=======================================" << endl;
+
+    if(process_id == ROOT) {
+        RECORD_TIMINGS_START(recordTimings::Machine::cpu, "Final merge time");
+        cout << "Final merge..." << endl;
+        auto tStartFinalMerge = now();
+        finalMerge(options, targetDir, state, indexer, chunks);
+        auto finalMergeDuration = now() - tStartFinalMerge;
+        cout << "Final merge done" << endl;
+        fstream signalToCopier;
+        signalToCopier.open(targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing_done", ios::out);
+        signalToCopier << to_string(indexDuration + finalMergeDuration);
+        signalToCopier.close();
+        {
+            fstream().open(
+                    targetDir + "/indexing_done_signals/batchno_" + to_string(batchNum - 1) + "_indexing"+ "_time_written",
+                    ios::out);
+        }
+        RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "Final merge time");
+        RECORD_TIMINGS_START (recordTimings::Machine::cpu, "wait time for concatenating octree files");
+        while (!fs::exists(fs::path(targetDir + "/indexing_copy_done_signals/batchno_" + to_string(batchNum-1) + "_concatenated")) && ((batchNum - 1) >= 0)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+        RECORD_TIMINGS_STOP (recordTimings::Machine::cpu, "wait time for concatenating octree files");
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+}
+
+
+
 
 void createReport(Options& options, vector<Source> sources, string targetDir, Stats& stats, State& state, double tStart) {
 	double duration = now() - tStart;
@@ -494,76 +684,107 @@ void generatePage(string exePath, string pagedir, string pagename) {
 
 #include "HierarchyBuilder.h"
 
-int main(int argc, char** argv) {
-
-	
-	// { // DEBUG STUFF
-
-	// 	string hierarchyDir = "D:/dev/pointclouds/Riegl/retz_converted/.hierarchyChunks";
-	// 	int hierarchyStepSize = 4;
-
-	// 	HierarchyBuilder builder(hierarchyDir, hierarchyStepSize);
-	// 	builder.build();
-
-	// 	return 0;
-	// }
 
 
+int n_processes, process_id;
 
-	double tStart = now(); 
-
-	auto exePath = fs::canonical(fs::absolute(argv[0])).parent_path().string();
-
-	launchMemoryChecker(2 * 1024, 0.1);
-	auto cpuData = getCpuData();
-
-	cout << "#threads: " << cpuData.numProcessors << endl;
-
-	auto options = parseArguments(argc, argv);
-
-	auto [name, sources] = curateSources(options.source);
-	if (options.name.size() == 0) {
-		options.name = name;
-	}
-
-	auto outputAttributes = computeOutputAttributes(sources, options.attributes);
-	cout << toString(outputAttributes);
-
-	auto stats = computeStats(sources);
-	
-	string targetDir = options.outdir;
-	if (options.generatePage) {
-
-		string pagedir = targetDir;
-		generatePage(exePath, pagedir, options.pageName);
-
-		targetDir = targetDir + "/pointclouds/" + options.pageName;
-	}
-	cout << "target directory: '" << targetDir << "'" << endl;
-	fs::create_directories(targetDir);
-	logger::addOutputFile(targetDir + "/log.txt");
-
-	State state;
-	state.pointsTotal = stats.totalPoints;
-	state.bytesProcessed = stats.totalBytes;
-
-	// auto monitor = startMonitoring(state);
-	auto monitor = make_shared<Monitor>(&state);
-	monitor->start();
+RECORD_TIMINGS_INIT();
+int main(int argc, char **argv) {
 
 
-	{ // this is the real important stuff
+    //RECORD_TIMINGS_DISABLE();
+    cout << "PotreeConverterMPI started" << endl;
+    int provided;
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_SERIALIZED, &provided);
+    if (provided != MPI_THREAD_SERIALIZED) {
+        cout << "MPI does not support MPI_THREAD_SERIALIZED" << endl;
+        exit(1);
+    }
+    MPI_Comm_size(MPI_COMM_WORLD, &n_processes);
+    MPI_Comm_rank(MPI_COMM_WORLD, &process_id);
 
-		chunking(options, sources, targetDir, stats, state, outputAttributes, monitor.get());
-
-		indexing(options, targetDir, state);
-
-	}
-
-	monitor->stop();
-
-	createReport(options, sources, targetDir, stats, state, tStart);
 
 
-	return 0;
+
+    if(process_id == ROOT) RECORD_TIMINGS_START(recordTimings::Machine::cpu, "The total_execution time");
+
+    double tStart = now();
+
+    auto exePath = fs::canonical(fs::absolute(argv[0])).parent_path().string();
+
+    launchMemoryChecker(2 * 1024, 0.1);
+
+
+
+
+    auto options = parseArguments(argc, argv);
+
+    auto cpuData = getCpuData();
+
+    cout << "#threads: " << cpuData.numProcessors << endl;
+
+    // The partitioned implementation requires to store the LAZ headers in seperate JSON files. The headers are stored in the headerDir.
+    // This will allow us to read the headers of all the LAZ files without loading all the LAZ files.
+    // This function reads the headers from JSON files and stores them in a vector of Source objects.
+    auto headers = curateHeaders(options.headerDir);
+
+    auto outputAttributes = computeOutputAttributes(headers, options.attributes, options.manualBounds);
+
+    cout << toString(outputAttributes);
+
+    auto stats = computeStats(headers, options.manualBounds);
+
+    options.name = splitString("/", options.headerDir).back();
+
+    string targetDir = options.outdir;
+    if (options.generatePage && process_id == ROOT) {
+
+        string pagedir = targetDir;
+        generatePage(exePath, pagedir, options.pageName);
+
+        targetDir = targetDir + "/pointclouds/" + options.pageName;
+    }
+    cout << "target directory: '" << targetDir << "'" << endl;
+
+    if (process_id == ROOT) fs::create_directories(targetDir + "/hierarchyChunks");
+    fs::create_directories(targetDir + "/chunks_" + to_string(process_id));
+
+    string logFile = targetDir + "/log_" + to_string(process_id) + ".txt";
+    logger::addOutputFile(logFile);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    State state;
+    state.pointsTotal = stats.totalPoints;
+    state.bytesProcessed = stats.totalBytes;
+
+    // auto monitor = startMonitoring(state);
+    auto monitor = make_shared<Monitor>(&state);
+    monitor->start();
+
+    // this is the real important stuff
+
+    //output attributes are point attributes in LAZ including scale and offset
+    //monitor for printing output messages about CPU, RAM usage and throughput
+    //sate for keeping track of points processed
+    process(options, stats, state, targetDir, outputAttributes, monitor.get());
+
+
+    monitor->stop();
+
+    if (process_id == ROOT) {
+        createReport(options, headers, targetDir, stats, state, tStart);
+    }
+
+
+
+
+    if(process_id == ROOT) RECORD_TIMINGS_STOP(recordTimings::Machine::cpu, "The total_execution time");
+
+    fstream recordTimingsFile;
+    recordTimingsFile.open(targetDir + "/recordTimings" + to_string(process_id) + ".txt", ios::out);
+    RECORD_TIMINGS_PRINT(recordTimingsFile);
+
+    MPI_Finalize();
+
+    return 0;
 }

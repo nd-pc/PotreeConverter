@@ -1,11 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_SUPPRESS_REGENERATION true)
 
-project(PotreeConverter LANGUAGES CXX)
+project(PotreeConverterMPI LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)
+
+
+set(target PotreeConverterMPI)
 
 #message(${PROJECT_SOURCE_DIR})
 
@@ -16,7 +19,9 @@ set(HEADER_FILES
 	./Converter/include/ConcurrentWriter.h
 	./Converter/include/converter_utils.h
 	./Converter/include/indexer.h
+	./Converter/include/MPIcommon.h
 	./Converter/include/prototyping.h
+	./Converter/include/record_timings.hpp
 	./Converter/include/sampler_poisson.h
 	./Converter/include/sampler_poisson_average.h
 	./Converter/include/sampler_random.h
@@ -28,7 +33,7 @@ set(HEADER_FILES
 	./Converter/modules/unsuck/unsuck.hpp
 )
 
-add_executable(PotreeConverter 
+add_executable(${target}
 	./Converter/src/chunker_countsort_laszip.cpp
 	./Converter/src/indexer.cpp 
 	./Converter/src/main.cpp
@@ -40,28 +45,40 @@ add_executable(PotreeConverter
 
 set(LASZIP_DIR "${PROJECT_SOURCE_DIR}/Converter/libs/laszip")
 add_subdirectory(${LASZIP_DIR})
-target_link_libraries(PotreeConverter laszip)
+target_link_libraries(${target} laszip)
 
 set(BROTLI_DIR "${PROJECT_SOURCE_DIR}/Converter/libs/brotli")
 add_subdirectory(${BROTLI_DIR})
-target_link_libraries(PotreeConverter brotlienc-static)
-target_link_libraries(PotreeConverter brotlidec-static)
+target_link_libraries(${target} brotlienc-static)
+target_link_libraries(${target} brotlidec-static)
 
 
-target_include_directories(PotreeConverter PRIVATE "./Converter/include")
-target_include_directories(PotreeConverter PRIVATE "./Converter/modules")
-target_include_directories(PotreeConverter PRIVATE "./Converter/libs")
+target_include_directories(${target} PRIVATE "./Converter/include")
+target_include_directories(${target} PRIVATE "./Converter/modules")
+target_include_directories(${target} PRIVATE "./Converter/libs")
+
+
 
 
 if (UNIX)
+	find_package(MPI REQUIRED)
 	find_package(Threads REQUIRED)
 	find_package(TBB REQUIRED)
 	
 	target_link_libraries(${PROJECT_NAME} Threads::Threads)
 	target_link_libraries(${PROJECT_NAME} tbb)
-
+	target_link_libraries(${target} ${MPI_CXX_LIBRARIES})
+	target_link_libraries(${target} ${MPI_CXX_LINK_FLAGS})
+	target_include_directories(${target} PRIVATE ${MPI_CXX_INCLUDE_PATH})
+	target_compile_options(${target} PRIVATE ${MPI_CXX_COMPILE_FLAGS})
+	#target_compile_definitions(${target} PRIVATE OMPI_SKIP_MPICXX)
+	target_compile_definitions(${target} PRIVATE MPI_CXX_SKIP_MPICXX)
+	target_compile_options(${target} PRIVATE -g)
 
 	#SET(CMAKE_CXX_FLAGS "-pthread -ltbb")
+
+else()
+	message(FATAL_ERROR "This is PotreeConverter MPI implementation. Currently it only supports UNIX clusters")
 endif (UNIX)
 
 ###############################################
@@ -69,7 +86,7 @@ endif (UNIX)
 ###############################################
 
 add_custom_command(
-	TARGET PotreeConverter POST_BUILD
+	TARGET ${target} POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy_directory
 		${PROJECT_SOURCE_DIR}/resources/page_template
 		$<TARGET_FILE_DIR:${PROJECT_NAME}>/resources/page_template)
@@ -78,31 +95,31 @@ add_custom_command(
 # COPY LICENSE FILES TO BINARY DIRECTORY
 ###############################################
 add_custom_command(
-	TARGET PotreeConverter POST_BUILD
+	TARGET ${target} POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy
 		${LASZIP_DIR}/COPYING
 		$<TARGET_FILE_DIR:${PROJECT_NAME}>/licenses/license_laszip.txt)
 
 add_custom_command(
-	TARGET PotreeConverter POST_BUILD
+	TARGET ${target} POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy
 		${BROTLI_DIR}/LICENSE
 		$<TARGET_FILE_DIR:${PROJECT_NAME}>/licenses/license_brotli.txt)
 
 add_custom_command(
-	TARGET PotreeConverter POST_BUILD
+	TARGET ${target} POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy
 		${PROJECT_SOURCE_DIR}/Converter/libs/json/LICENSE
 		$<TARGET_FILE_DIR:${PROJECT_NAME}>/licenses/license_json.txt)
 
 add_custom_command(
-	TARGET PotreeConverter POST_BUILD
+	TARGET ${target} POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy
 		${PROJECT_SOURCE_DIR}/LICENSE
 		$<TARGET_FILE_DIR:${PROJECT_NAME}>/licenses/license_potree_converter.txt)
 
 add_custom_command(
-	TARGET PotreeConverter POST_BUILD
+	TARGET ${target} POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy
 		${PROJECT_SOURCE_DIR}/README.md
 		$<TARGET_FILE_DIR:${PROJECT_NAME}>/README.md)

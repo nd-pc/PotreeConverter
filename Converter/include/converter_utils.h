@@ -10,8 +10,9 @@
 #include <mutex>
 #include <atomic>
 #include <map>
+#include <execution>
 
-//#include "LasLoader/LasLoader.h"
+#include "LasLoader/LasLoader.h"
 #include "unsuck/unsuck.hpp"
 #include "Vector3.h"
 
@@ -38,19 +39,109 @@ struct LASPointF2 {
 	uint16_t b;
 };
 
-
-struct Source {
-	string path;
-	uint64_t filesize;
-
-	uint64_t numPoints = 0;
-	int bytesPerPoint = 0;
-	Vector3 min;
-	Vector3 max;
+enum SourceFileType{
+    DATA,
+    HEADER
 };
 
+struct vlr {
+    vector<uint8_t> data;
+    uint16_t recordID;
+
+    std::string toString() const {
+        std::stringstream ss;
+        ss << "Record ID: " << recordID << ", Data: [";
+        for (size_t i = 0; i < data.size(); ++i) {
+            ss << static_cast<int>(data[i]);
+        }
+        ss << "]";
+        return ss.str();
+    }
+};
+
+class Source {
+public:
+    std::string path;
+    uint64_t filesize;
+    uint64_t numPoints;
+    uint16_t pointDataRecordLength;
+    int bytesPerPoint;
+    Vector3 min;
+    Vector3 max;
+    Vector3 scale;
+    uint8_t pointDataFormat;
+    std::vector<vlr> vlrs;
+    SourceFileType type;
+
+    // Overloaded toString function
+    std::string toString() const {
+        std::stringstream ss;
+        ss << "Path: " << path << "\n";
+        ss << "Filesize: " << filesize << " bytes\n";
+        ss << "Number of Points: " << numPoints << "\n";
+        ss << "Point Data Record Length: " << pointDataRecordLength << "\n";
+        ss << "Bytes Per Point: " << bytesPerPoint << "\n";
+        ss << "Min: " << "[" << min.toString() << "]" << "\n";
+        ss << "Max: " << "[" << max.toString() << "]" "\n";
+        ss << "Scale: " << "[" << scale.toString() << "]" "\n";
+        ss << "Point Data Format: " << static_cast<int>(pointDataFormat) << "\n";
+        ss << "Variable Length Records (VLRs):\n";
+        for (const auto& vlr : vlrs) {
+            ss << vlr.toString() << "\n";
+        }
+        // Add other members as needed
+
+        return ss.str();
+    }
+};
+
+inline vector<Source> curateSources(vector<string> paths) {
+
+
+
+    vector<Source> sources;
+    sources.reserve(paths.size());
+
+    mutex mtx;
+    auto parallel = std::execution::par;
+    for_each(parallel, paths.begin(), paths.end(), [&mtx, &sources](string path) {
+
+        auto header = loadLasHeader(path);
+        //auto filesize = fs::file_size(path);
+
+        Vector3 min = { header.min.x, header.min.y, header.min.z };
+        Vector3 max = { header.max.x, header.max.y, header.max.z };
+        Vector3 scale = { header.scale.x, header.scale.y, header.scale.z };
+
+        Source source;
+        source.path = path;
+        source.min = min;
+        source.max = max;
+        source.scale = scale;
+        source.pointDataRecordLength = header.pointDataRecordLength;
+        source.numPoints = header.numPoints;
+        source.filesize = header.numPoints * header.pointDataRecordLength;
+        source.pointDataFormat = header.pointDataFormat;
+        vector<vlr> vlrs;
+        int n = 0;
+        for(auto r : header.vlrs){
+            vlr v;
+            v.data = r.data;
+            v.recordID = r.recordID;
+        }
+
+
+        source.type = SourceFileType::DATA;
+
+        lock_guard<mutex> lock(mtx);
+        sources.push_back(source);
+    });
+
+    return sources;
+}
 struct State {
-	string name = "";
+
+    string name = "";
 	atomic_int64_t pointsTotal = 0;
 	atomic_int64_t pointsProcessed = 0;
 	atomic_int64_t bytesProcessed = 0;
@@ -157,9 +248,9 @@ inline void dbgPrint_ts_later(string message, bool now = false) {
 
 
 struct Options {
-	vector<string> source;
 	string encoding = "DEFAULT"; // "BROTLI", "UNCOMPRESSED"
 	string outdir = "";
+    string headerDir = "";
 	string name = "";
 	string method = "";
 	string chunkMethod = "";
@@ -173,5 +264,7 @@ struct Options {
 	bool keepChunks = false;
 	bool noChunking = false;
 	bool noIndexing = false;
+    string manualBounds = "";
+    int memoryBudget = getMemoryData().physical_total/(1024 * 1024 * 1024);
 
 };

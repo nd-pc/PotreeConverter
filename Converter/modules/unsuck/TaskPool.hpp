@@ -39,6 +39,11 @@ public:
 		this->numThreads = numThreads;
 		this->processor = processor;
 
+        if (numThreads <= 0) {
+            cout << "ERROR: TaskPool: numThreads <= 0" << endl;
+            exit(1);
+        }
+
 		for (int i = 0; i < numThreads; i++) {
 
 			threads.emplace_back([this]() {

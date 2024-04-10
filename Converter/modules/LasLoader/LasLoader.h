@@ -20,6 +20,7 @@ struct VLR {
 	vector<uint8_t> data;
 };
 
+
 struct LasHeader {
 	Vector3 min;
 	Vector3 max;
@@ -29,6 +30,10 @@ struct LasHeader {
 	int64_t numPoints = 0;
 
 	int pointDataFormat = -1;
+
+    int pointDataRecordLength = 0;
+
+    int headerSize = 0;
 
 	vector<VLR> vlrs;
 };

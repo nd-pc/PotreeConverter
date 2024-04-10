@@ -2,6 +2,7 @@
 
 #include <thread>
 #include <map>
+#include "MPIcommon.h"
 
 #include "converter_utils.h"
 
@@ -39,10 +40,7 @@ struct Monitor {
 		string strCPU = formatNumber(CPU.usage) + "%";
 
 		stringstream ss;
-		ss << "[" << strProgressTotal << ", " << strTime << "], "
-			<< "[" << this->state->name << ": " << strProgressPass 
-			<< ", duration: " << strDuration 
-			<< ", throughput: " << strThroughput << "]"
+		ss	<< "[" << this->state->name + "  by process" <<  std::to_string(process_id) << ": current throughput: " << strThroughput << "]"
 			<< "[RAM: " << strRAM << ", CPU: " << strCPU << "]" << endl;
 
 		cout << ss.str() << std::flush;
